@@ -48,8 +48,9 @@ class Attack(object):
         self.tf_dtype = tf.as_dtype(dtypestr)
         self.np_dtype = np.dtype(dtypestr)
 
-        if sess is not None and not isinstance(sess, tf.Session):
-            raise TypeError("sess is not an instance of tf.Session")
+        if sess is not None and not isinstance(sess, tf.compat.v1.Session):
+            raise TypeError("sess is not an instance of tf.compat.v1.Session")
+
 
         import attacks_tf
 
@@ -292,7 +293,7 @@ class Attack(object):
         else:
             preds = self.model.get_probs(x)
             preds_max = reduce_max(preds, 1, keepdims=True)
-            original_predictions = tf.to_float(tf.equal(preds, preds_max))
+            original_predictions = tf.cast(tf.equal(preds, preds_max), tf.float32)
             labels = tf.stop_gradient(original_predictions)
             del preds
         if isinstance(labels, np.ndarray):

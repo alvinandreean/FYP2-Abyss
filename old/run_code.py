@@ -14,7 +14,8 @@ from model import CallableModelWrapper
 # For TF1-style session (cleverhans is based on TF1)
 tf.compat.v1.disable_eager_execution()
 sess = tf.compat.v1.Session()
-tf.keras.backend.set_session(sess)
+
+
 
 # Helper functions to load and preprocess images
 def load_image(image_path, target_size):
@@ -100,26 +101,31 @@ adv_img_inception = sess.run(x_adv_inception, feed_dict={x_inception_ph: img_inc
 # ---------------------------
 # Get predictions from the original and adversarial examples
 # For ResNet50, use the original keras model (which includes the softmax layer)
-preds_resnet_orig = resnet_model.predict(img_resnet)
+# Create your own placeholder:
+input_resnet_ph = tf.compat.v1.placeholder(tf.float32, shape=(None, 224, 224, 3))
+# Get the model's output from this placeholder:
+resnet_preds = resnet_model(input_resnet_ph)
+# Run the session using the new placeholder:
+preds_resnet_orig = sess.run(resnet_preds, feed_dict={input_resnet_ph: img_resnet})
 preds_resnet_adv = resnet_model.predict(adv_img_resnet)
 
 # For InceptionV3
-preds_inception_orig = inception_model.predict(img_inception)
-preds_inception_adv = inception_model.predict(adv_img_inception)
+# preds_inception_orig = inception_model.predict(img_inception)
+# preds_inception_adv = inception_model.predict(adv_img_inception)
 
 # Decode predictions (top-3 for brevity)
 resnet_labels_orig = resnet_decode(preds_resnet_orig, top=3)[0]
 resnet_labels_adv = resnet_decode(preds_resnet_adv, top=3)[0]
 
-inception_labels_orig = inception_decode(preds_inception_orig, top=3)[0]
-inception_labels_adv = inception_decode(preds_inception_adv, top=3)[0]
+# inception_labels_orig = inception_decode(preds_inception_orig, top=3)[0]
+# inception_labels_adv = inception_decode(preds_inception_adv, top=3)[0]
 
 # ---------------------------
 # Invert the preprocessing for display purposes
 disp_img_resnet_orig = orig_img_resnet.astype(np.uint8)  # original image is already in displayable form
 disp_img_resnet_adv = deprocess_resnet(adv_img_resnet[0])
-disp_img_inception_orig = orig_img_inception.astype(np.uint8)
-disp_img_inception_adv = deprocess_inception(adv_img_inception[0])
+# disp_img_inception_orig = orig_img_inception.astype(np.uint8)
+# disp_img_inception_adv = deprocess_inception(adv_img_inception[0])
 
 # ---------------------------
 # Helper function to plot images and predictions
@@ -144,4 +150,4 @@ def plot_results(original, adversarial, labels_orig, labels_adv, title):
 # ---------------------------
 # Plot the results for each model
 plot_results(disp_img_resnet_orig, disp_img_resnet_adv, resnet_labels_orig, resnet_labels_adv, "ResNet50 Results")
-plot_results(disp_img_inception_orig, disp_img_inception_adv, inception_labels_orig, inception_labels_adv, "InceptionV3 Results")
+# plot_results(disp_img_inception_orig, disp_img_inception_adv, inception_labels_orig, inception_labels_adv, "InceptionV3 Results")

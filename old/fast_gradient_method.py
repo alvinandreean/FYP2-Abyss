@@ -8,7 +8,7 @@ import numpy as np
 import tensorflow as tf
 
 from attack import Attack
-from ompat import reduce_max, reduce_sum, softmax_cross_entropy_with_logits
+from compat import reduce_max, reduce_sum, softmax_cross_entropy_with_logits
 import utils_tf
 
 
@@ -186,10 +186,10 @@ def fgm(
     assert logits.op.type != "Softmax"
 
     if y is None:
-        # Using model predictions as ground truth to avoid label leaking
         preds_max = reduce_max(logits, 1, keepdims=True)
-        y = tf.to_float(tf.equal(logits, preds_max))
+        y = tf.cast(tf.equal(logits, preds_max), tf.float32)
         y = tf.stop_gradient(y)
+
     y = y / reduce_sum(y, 1, keepdims=True)
 
     # Compute loss

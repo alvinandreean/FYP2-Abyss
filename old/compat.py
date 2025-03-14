@@ -78,28 +78,14 @@ def reduce_function(
 
 
 def softmax_cross_entropy_with_logits(sentinel=None, labels=None, logits=None, dim=-1):
-    """
-    Wrapper around tf.nn.softmax_cross_entropy_with_logits_v2 to handle
-    deprecated warning
-    """
-    # Make sure that all arguments were passed as named arguments.
+    # Ensure that all arguments are passed as named arguments.
     if sentinel is not None:
         name = "softmax_cross_entropy_with_logits"
-        raise ValueError(
-            "Only call `%s` with "
-            "named arguments (labels=..., logits=..., ...)" % name
-        )
+        raise ValueError("Only call `%s` with named arguments (labels=..., logits=..., ...)" % name)
     if labels is None or logits is None:
         raise ValueError("Both labels and logits must be provided.")
 
-    try:
-        f = tf.nn.softmax_cross_entropy_with_logits_v2
-    except AttributeError:
-        raise RuntimeError(
-            "This version of TensorFlow is no longer supported. See cleverhans/README.md"
-        )
-
+    # Use the TensorFlow 2.x version
     labels = tf.stop_gradient(labels)
-    loss = f(labels=labels, logits=logits, dim=dim)
-
+    loss = tf.nn.softmax_cross_entropy_with_logits(labels=labels, logits=logits)
     return loss

@@ -159,7 +159,7 @@ def train(
                 "optimizer object must be from a child class of " "tf.train.Optimizer"
             )
     # Trigger update operations within the default graph (such as batch_norm).
-    with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
+    with tf.control_dependencies(tf.get_collection(tf.compat.v1.GraphKeys.UPDATE_OPS)):
         train_step = optimizer.minimize(loss_value, var_list=var_list)
 
     with sess.as_default():
@@ -365,7 +365,7 @@ def l2_batch_normalize(x, epsilon=1e-12, scope=None):
 
 
 def kl_with_logits(
-    p_logits, q_logits, scope=None, loss_collection=tf.GraphKeys.REGULARIZATION_LOSSES
+    p_logits, q_logits, scope=None, loss_collection=tf.compat.v1.GraphKeys.REGULARIZATION_LOSSES
 ):
     """Helper function to compute kl-divergence KL(p || q)"""
     with tf.name_scope(scope, "kl_divergence") as name:
