@@ -85,7 +85,7 @@ def display_image(model, image, description, filename, decode_predictions, outpu
 def main(image_path=None):
     parser = argparse.ArgumentParser(description='Run FGSM attack on an image')
     parser.add_argument('--image', type=str,
-                        default="D:\\FYP\\FYP2-Abyss\\fgsm\\image\\redpanda.png",
+                        default="image/redpanda.png",
                         help='Path to the input image')
     parser.add_argument('--epsilon', type=float, default=0.05, help='Epsilon value for FGSM attack')
     parser.add_argument('--iterative', action='store_true', help='Use iterative FGSM (I-FGSM)')
@@ -94,13 +94,35 @@ def main(image_path=None):
     parser.add_argument('--target_class', type=int, help='Target class index for a targeted attack (ImageNet index)')
     parser.add_argument('--reduce_confidence', action='store_true',
                         help='Reduce model confidence by maximizing output entropy')
-    args = parser.parse_args()
     
-    # If reduce_confidence is enabled, ignore targeted options.
-    if args.reduce_confidence and args.targeted:
-        print("Warning: --reduce_confidence enabled; ignoring targeted attack options.")
+    try:
+        args = parser.parse_args()
+    except Exception as e:
+        # If parsing fails, try to get the image path directly
+        import sys
+        if len(sys.argv) > 1:
+            image_path = sys.argv[1]
+        args = parser.parse_args([])  # Parse with empty args
     
-    image_path = args.image
+    # If image_path is provided as a parameter or through sys.argv, use it
+    if image_path:
+        args.image = image_path
+    
+    # Normalize the path
+    image_path = os.path.normpath(args.image)
+    
+    if not os.path.isfile(image_path):
+        # If the path doesn't exist, try to find it relative to the project root
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        alt_path = os.path.join(project_root, image_path)
+        if os.path.isfile(alt_path):
+            image_path = alt_path
+    
+    if not os.path.isfile(image_path):
+        print(f"Error: Could not find image at {image_path}")
+        return
+    
+    print(f"Using image: {image_path}")
     
     print("Loading pretrained model...")
     pretrained_model = tf.keras.applications.MobileNetV2(include_top=True, weights='imagenet')
