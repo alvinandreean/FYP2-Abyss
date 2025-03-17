@@ -5,6 +5,7 @@ import sys
 import io
 import os
 import argparse
+import random
 
 # Fix encoding issues
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -12,173 +13,201 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 matplotlib.rcParams['figure.figsize'] = (8, 8)
 matplotlib.rcParams['axes.grid'] = False
 
-def main(image_path=None):
-    # Parse command line arguments if no image path is provided
-    if image_path is None:
-        parser = argparse.ArgumentParser(description='Run FGSM attack on an image')
-        parser.add_argument('--image', type=str, help='Path to the input image')
-        args = parser.parse_args()
-        
-        if args.image:
-            image_path = args.image
+def preprocess(image):
+    """Preprocess the image to be compatible with MobileNetV2."""
+    image = tf.cast(image, tf.float32)
+    image = tf.image.resize(image, (224, 224))
+    image = tf.keras.applications.mobilenet_v2.preprocess_input(image)
+    return image[None, ...]
+
+def get_imagenet_label(probs, decode_predictions):
+    """Extract the label and confidence from the model's probability vector."""
+    try:
+        result = decode_predictions(probs, top=1)[0][0]
+        _, class_name, confidence = result
+        class_name = class_name.encode('ascii', 'replace').decode('ascii')
+        return result[0], class_name, confidence
+    except Exception as e:
+        print(f"Error in get_imagenet_label: {e}")
+        return ("unknown", "unknown", 0.0)
+
+def create_adversarial_pattern(model, loss_object, input_image, input_label):
+    """Generate untargeted adversarial perturbation using one-shot FGSM."""
+    with tf.GradientTape() as tape:
+        tape.watch(input_image)
+        prediction = model(input_image)
+        loss = loss_object(input_label, prediction)
+    gradient = tape.gradient(loss, input_image)
+    return tf.sign(gradient)
+
+def create_targeted_adversarial_pattern(model, loss_object, input_image, target_label):
+    """Generate targeted adversarial perturbation using one-shot FGSM (negative update)."""
+    with tf.GradientTape() as tape:
+        tape.watch(input_image)
+        prediction = model(input_image)
+        loss = loss_object(target_label, prediction)
+    gradient = tape.gradient(loss, input_image)
+    return tf.sign(gradient)
+
+def iterative_fgsm_attack(model, loss_object, image, label, epsilon, num_steps, targeted=False):
+    """
+    Perform an iterative FGSM attack (I-FGSM).
+    If targeted is True, subtract the update; otherwise, add it.
+    """
+    adv_image = tf.identity(image)
+    step_size = epsilon / num_steps
+    for i in range(num_steps):
+        with tf.GradientTape() as tape:
+            tape.watch(adv_image)
+            prediction = model(adv_image)
+            loss = loss_object(label, prediction)
+        gradient = tape.gradient(loss, adv_image)
+        if targeted:
+            adv_image = adv_image - step_size * tf.sign(gradient)
         else:
-            print("No image path provided. Please provide an image path using --image argument")
-            print("Using default image from ImageNet as fallback...")
-            image_path = tf.keras.utils.get_file('YellowLabradorLooking_new.jpg', 
-                                               'https://storage.googleapis.com/download.tensorflow.org/example_images/YellowLabradorLooking_new.jpg')
+            adv_image = adv_image + step_size * tf.sign(gradient)
+        adv_image = tf.clip_by_value(adv_image, -1, 1)
+    return adv_image
 
-    # Load pretrained model
+def display_image(model, image, description, filename, decode_predictions, output_dir):
+    """
+    Display and save the image with its predicted label and confidence.
+    """
+    prediction = model.predict(image, verbose=0)
+    _, label_text, confidence = get_imagenet_label(prediction, decode_predictions)
+    plt.figure()
+    plt.imshow(image[0] * 0.5 + 0.5)  # Convert from [-1,1] to [0,1]
+    plt.title(f'{description}\n{label_text}: {confidence * 100:.2f}% Confidence')
+    plt.savefig(os.path.join(output_dir, filename))
+    plt.close()
+    print(f"{description}: classified as {label_text} with {confidence * 100:.2f}% confidence")
+
+def main(image_path=None):
+    parser = argparse.ArgumentParser(description='Run FGSM attack on an image')
+    parser.add_argument('--image', type=str,
+                        default="D:\\FYP\\FYP2-Abyss\\fgsm\\image\\redpanda.png",
+                        help='Path to the input image')
+    parser.add_argument('--epsilon', type=float, default=0.05, help='Epsilon value for FGSM attack')
+    parser.add_argument('--iterative', action='store_true', help='Use iterative FGSM (I-FGSM)')
+    parser.add_argument('--num_steps', type=int, default=10, help='Number of steps for iterative attack')
+    parser.add_argument('--targeted', action='store_true', help='Perform a targeted attack')
+    parser.add_argument('--target_class', type=int, help='Target class index for a targeted attack (ImageNet index)')
+    parser.add_argument('--reduce_confidence', action='store_true',
+                        help='Reduce model confidence by maximizing output entropy')
+    args = parser.parse_args()
+    
+    # If reduce_confidence is enabled, ignore targeted options.
+    if args.reduce_confidence and args.targeted:
+        print("Warning: --reduce_confidence enabled; ignoring targeted attack options.")
+    
+    image_path = args.image
+    
     print("Loading pretrained model...")
-    pretrained_model = tf.keras.applications.MobileNetV2(include_top=True,
-                                                        weights='imagenet')
+    pretrained_model = tf.keras.applications.MobileNetV2(include_top=True, weights='imagenet')
     pretrained_model.trainable = False
-
-    # ImageNet labels
     decode_predictions = tf.keras.applications.mobilenet_v2.decode_predictions
 
-    # Helper function to preprocess the image so that it can be inputted in MobileNetV2
-    def preprocess(image):
-        image = tf.cast(image, tf.float32)
-        image = tf.image.resize(image, (224, 224))
-        image = tf.keras.applications.mobilenet_v2.preprocess_input(image)
-        image = image[None, ...]
-        return image
-
-    # Helper function to extract labels from probability vector
-    def get_imagenet_label(probs):
-        try:
-            # Handle potential Unicode issues in label names
-            result = decode_predictions(probs, top=1)[0][0]
-            # Replace any problematic characters in the class name
-            _, class_name, confidence = result
-            class_name = class_name.encode('ascii', 'replace').decode('ascii')
-            return (result[0], class_name, confidence)
-        except Exception as e:
-            print(f"Error in get_imagenet_label: {e}")
-            return ("unknown", "unknown", 0.0)
-
-    # Load and preprocess the image
     print(f"Loading and preprocessing image from: {image_path}")
     try:
-        # Check if the image path is a local file
-        if os.path.isfile(image_path):
-            image_raw = tf.io.read_file(image_path)
-        else:
-            # If not a local file, try to download it
-            print("Image not found locally, attempting to download...")
-            image_raw = tf.io.read_file(image_path)
+        image_raw = tf.io.read_file(image_path)
     except Exception as e:
         print(f"Error loading image: {e}")
         return
 
-    # Try different decoders based on file extension
     try:
         file_ext = os.path.splitext(image_path)[1].lower()
-        if file_ext == '.png':
-            image = tf.image.decode_png(image_raw, channels=3)
-        elif file_ext in ['.jpg', '.jpeg']:
-            image = tf.image.decode_jpeg(image_raw, channels=3)
-        else:
-            # Try generic decoder
+        if file_ext in ['.png', '.jpg', '.jpeg']:
             image = tf.image.decode_image(image_raw, channels=3)
-            # Set shape information since decode_image doesn't set it
             image.set_shape([None, None, 3])
+        else:
+            print("Unsupported file format.")
+            return
     except Exception as e:
         print(f"Error decoding image: {e}")
-        print("Trying generic image decoder...")
-        try:
-            image = tf.image.decode_image(image_raw, channels=3)
-            image.set_shape([None, None, 3])
-        except Exception as e2:
-            print(f"Failed to decode image: {e2}")
-            return
+        return
 
-    # Create output directory for results
     output_dir = "fgsm_results"
     os.makedirs(output_dir, exist_ok=True)
-    
-    # Preprocess the image
     image = preprocess(image)
-    
+
     print("Running prediction on original image...")
     image_probs = pretrained_model.predict(image, verbose=0)
-
-    # Display original image
+    _, orig_class, class_confidence = get_imagenet_label(image_probs, decode_predictions)
     plt.figure()
-    plt.imshow(image[0] * 0.5 + 0.5)  # To change [-1, 1] to [0,1]
-    _, image_class, class_confidence = get_imagenet_label(image_probs)
-    plt.title(f'{image_class} : {class_confidence*100:.2f}% Confidence')
+    plt.imshow(image[0] * 0.5 + 0.5)
+    plt.title(f'{orig_class} : {class_confidence * 100:.2f}% Confidence')
     plt.savefig(os.path.join(output_dir, 'original_image.png'))
     plt.close()
-    print(f"Original image classified as: {image_class} with {class_confidence*100:.2f}% confidence")
-
-    # Define loss function for creating adversarial examples
-    loss_object = tf.keras.losses.CategoricalCrossentropy()
-
-    def create_adversarial_pattern(input_image, input_label):
-        with tf.GradientTape() as tape:
-            tape.watch(input_image)
-            prediction = pretrained_model(input_image)
-            loss = loss_object(input_label, prediction)
-
-        # Get the gradients of the loss w.r.t to the input image.
-        gradient = tape.gradient(loss, input_image)
-        # Get the sign of the gradients to create the perturbation
-        signed_grad = tf.sign(gradient)
-        return signed_grad
-
-    # Get the input label of the image (use the predicted class)
-    print("Creating adversarial pattern...")
-    predicted_class_idx = tf.argmax(image_probs[0]).numpy()
-    print(f"Using predicted class index: {predicted_class_idx}")
-    label = tf.one_hot(predicted_class_idx, image_probs.shape[-1])
-    label = tf.reshape(label, (1, image_probs.shape[-1]))
-
-    # Create perturbations
-    perturbations = create_adversarial_pattern(image, label)
+    print(f"Original image classified as: {orig_class} with {class_confidence * 100:.2f}% confidence")
     
-    # Display perturbation pattern
-    plt.figure()
-    plt.imshow(perturbations[0] * 0.5 + 0.5)  # To change [-1, 1] to [0,1]
-    plt.title('Perturbation Pattern')
-    plt.savefig(os.path.join(output_dir, 'perturbation_pattern.png'))
-    plt.close()
-    print(f"Perturbation pattern saved to {output_dir}/perturbation_pattern.png")
+    # Set up loss function
+    if args.reduce_confidence:
+        # Use KL divergence with a uniform target distribution to force low confidence.
+        num_classes = image_probs.shape[-1]
+        uniform_dist = tf.constant([1.0 / num_classes] * num_classes, shape=(1, num_classes))
+        def kl_loss(dummy, prediction):
+            # Compute KL divergence: sum(uniform * log(uniform / prediction))
+            return tf.reduce_sum(uniform_dist * tf.math.log((uniform_dist + 1e-10) / (prediction + 1e-10)))
+        loss_object = kl_loss
+        label_to_use = None  # Not used in this loss.
+        print("Using confidence reduction loss (KL divergence with uniform distribution) to lower model confidence.")
+    else:
+        loss_object = tf.keras.losses.CategoricalCrossentropy()
+        # For untargeted attack, use the predicted label.
+        predicted_class_idx = tf.argmax(image_probs[0]).numpy()
+        true_label = tf.one_hot(predicted_class_idx, image_probs.shape[-1])
+        true_label = tf.reshape(true_label, (1, image_probs.shape[-1]))
+        label_to_use = true_label
 
-    def display_images(image, description, filename):
-        try:
-            prediction = pretrained_model.predict(image, verbose=0)
-            _, label, confidence = get_imagenet_label(prediction)
-            plt.figure()
-            plt.imshow(image[0]*0.5+0.5)
-            plt.title(f'{description}\n{label}: {confidence*100:.2f}% Confidence')
-            plt.savefig(os.path.join(output_dir, filename))
-            plt.close()  # Close the figure to free memory
-            print(f"{description}: classified as {label} with {confidence*100:.2f}% confidence")
-        except Exception as e:
-            print(f"Error displaying image {description}: {e}")
+    # For targeted attack (if not reducing confidence)
+    if args.targeted and not args.reduce_confidence:
+        if args.target_class is None:
+            possible_targets = list(range(1000))
+            possible_targets.remove(tf.argmax(image_probs[0]).numpy())
+            target_class_idx = random.choice(possible_targets)
+            print(f"No target class provided. Randomly selected target class index: {target_class_idx}")
+        else:
+            target_class_idx = args.target_class
+        target_label = tf.one_hot(target_class_idx, image_probs.shape[-1])
+        target_label = tf.reshape(target_label, (1, image_probs.shape[-1]))
+        label_to_use = target_label
+        print(f"Using targeted attack with target class index: {target_class_idx}")
 
-    # Test with different epsilon values
-    print("Generating adversarial examples with different epsilon values...")
-    epsilons = [0, 0.01, 0.1, 0.15]
-    descriptions = [('Epsilon = {:.3f}'.format(eps) if eps else 'Input')
-                    for eps in epsilons]
-    
-    for i, eps in enumerate(epsilons):
-        adv_x = image + eps*perturbations
-        adv_x = tf.clip_by_value(adv_x, -1, 1)
-        filename = f'adversarial_example_eps_{eps}.png'
-        display_images(adv_x, descriptions[i], filename)
+    # Create adversarial example
+    if args.iterative:
+        print("Performing iterative FGSM attack...")
+        if args.targeted and not args.reduce_confidence:
+            adv_image = iterative_fgsm_attack(pretrained_model, loss_object, image, label_to_use,
+                                              epsilon=args.epsilon, num_steps=args.num_steps, targeted=True)
+            attack_mode = f"Iterative Targeted (eps={args.epsilon}, steps={args.num_steps})"
+        else:
+            adv_image = iterative_fgsm_attack(pretrained_model, loss_object, image,
+                                              label_to_use if label_to_use is not None else tf.zeros_like(image_probs),
+                                              epsilon=args.epsilon, num_steps=args.num_steps, targeted=False)
+            mode_desc = "Confidence Reduction" if args.reduce_confidence else "Untargeted"
+            attack_mode = f"Iterative {mode_desc} (eps={args.epsilon}, steps={args.num_steps})"
+        filename = f'adversarial_iterative_{"targeted" if (args.targeted and not args.reduce_confidence) else "untargeted"}.png'
+        display_image(pretrained_model, adv_image, attack_mode, filename, decode_predictions, output_dir)
+    else:
+        print("Performing one-shot FGSM attack...")
+        if args.targeted and not args.reduce_confidence:
+            perturbations = create_targeted_adversarial_pattern(pretrained_model, loss_object, image, label_to_use)
+            adv_image = image - args.epsilon * perturbations
+            attack_mode = f"One-Shot Targeted (eps={args.epsilon})"
+            filename = 'adversarial_oneshot_targeted.png'
+        else:
+            perturbations = create_adversarial_pattern(pretrained_model, loss_object, image, label_to_use if label_to_use is not None else tf.zeros_like(image_probs))
+            adv_image = image + args.epsilon * perturbations
+            mode_desc = "Confidence Reduction" if args.reduce_confidence else "Untargeted"
+            attack_mode = f"One-Shot {mode_desc} (eps={args.epsilon})"
+            filename = 'adversarial_oneshot_untargeted.png'
+        adv_image = tf.clip_by_value(adv_image, -1, 1)
+        display_image(pretrained_model, adv_image, attack_mode, filename, decode_predictions, output_dir)
 
     print(f"All adversarial examples have been generated and saved to {output_dir}/")
 
 if __name__ == "__main__":
     try:
-        main("image\panda.jpg")
+        main()
     except Exception as e:
         print(f"An error occurred: {e}")
-
-
-
-
-
