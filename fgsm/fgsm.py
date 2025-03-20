@@ -236,36 +236,16 @@ class FGSM:
         plt.close()
 
 def main():
-        # Path to the image you want to test
-        image_path = "image/panda.jpg"  # Change this to your image path
-
-        # Create FGSM instance (epsilon is irrelevant here because auto-tune calculates it)
-        fgsm = FGSM()
-
-        # Run the auto-tuning attack
-        fgsm.auto_tune_attack(
-            
-            image_path=image_path,
-            epsilon_start=0.001,   # Start testing from 0.001
-            epsilon_end=0.1,       # Stop testing at 0.1 if not successful
-            step=0.001             # Increase epsilon by 0.001 each loop
-        )
+    # image_path = "image/animals/val/dog/dog1.jpg"  # Change image path here
+    image_path = "image/panda.jpg"
+    
+    # Create FGSM attack instance, can adjust epsilon here
+    fgsm = FGSM(epsilon=0.05)
+    
+    fgsm.attack(image_path)
 
 if __name__ == "__main__":
     main()
-
-
-# def main():
-#     # image_path = "image/animals/val/dog/dog1.jpg"  # Change image path here
-#     image_path = "image/panda.jpg"
-    
-#     # Create FGSM attack instance, can adjust epsilon here
-#     fgsm = FGSM(epsilon=0.05)
-    
-#     fgsm.attack(image_path)
-
-# if __name__ == "__main__":
-#     main()
     
     
     
