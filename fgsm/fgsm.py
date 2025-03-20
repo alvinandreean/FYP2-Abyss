@@ -134,9 +134,6 @@ class FGSM:
         )
 
     def auto_tune_attack(self, image_path, epsilon_start=0.001, epsilon_end=0.1, step=0.001):
-        """
-        Automatically tune epsilon to find the smallest value that causes misclassification.
-        """
         output_dir = "fgsm_results"
         os.makedirs(output_dir, exist_ok=True)
 
@@ -156,41 +153,33 @@ class FGSM:
         target = tf.one_hot(predicted_class_idx, image_probs.shape[-1])
         target = tf.reshape(target, (1, image_probs.shape[-1]))
 
-        # Start auto-tuning loop
-        epsilon = epsilon_start
-        success = False
-        best_result = None
+        # Precompute perturbations
+        perturbations = self.create_adversarial_pattern(image, target)
 
-        while epsilon <= epsilon_end:
-            perturbations = self.create_adversarial_pattern(image, target)
-            adversarial_image = image + epsilon * perturbations
-            adversarial_image = tf.clip_by_value(adversarial_image, -1, 1)
+        # Generate adversarial images for all epsilon values
+        epsilons = np.arange(epsilon_start, epsilon_end + step, step)
+        adversarial_images = [tf.clip_by_value(image + eps * perturbations, -1, 1) for eps in epsilons]
+        adversarial_images = tf.concat(adversarial_images, axis=0)
 
-            # Predict adversarial image
-            adv_probs = self.model.predict(adversarial_image, verbose=0)
+        # Predict all adversarial images in one batch
+        adv_probs_batch = self.model.predict(adversarial_images, verbose=0)
+
+        # Check for misclassification
+        for i, eps in enumerate(epsilons):
+            adv_probs = adv_probs_batch[i:i+1]
             _, adv_class, adv_conf = self.get_imagenet_label(adv_probs)
 
-            print(f"ε={epsilon:.4f} | Adversarial Prediction: {adv_class} ({adv_conf * 100:.2f}%)")
-
             if adv_class != orig_class:
-                success = True
-                best_result = (epsilon, adv_class, adv_conf)
-                # Optional: break on first success
-                break
+                print(f"\n✅ Attack successful! Minimum ε = {eps:.4f}")
+                print(f"Adversarial Class: {adv_class} | Confidence: {adv_conf * 100:.2f}%")
+                self.display_attack_results(
+                    image, perturbations, adversarial_images[i:i+1],
+                    orig_class, adv_class, orig_conf, adv_conf,
+                    output_dir
+                )
+                return
 
-            epsilon += step
-
-        if success:
-            print(f"\n✅ Attack successful! Minimum ε = {best_result[0]:.4f}")
-            print(f"Adversarial Class: {best_result[1]} | Confidence: {best_result[2] * 100:.2f}%")
-            # Optional: Visualize this successful attack
-            self.display_attack_results(
-                image, perturbations, adversarial_image,
-                orig_class, best_result[1], orig_conf, best_result[2],
-                output_dir
-            )
-        else:
-            print("\n❌ Attack failed. No epsilon in range caused misclassification.")
+        print("\n❌ Attack failed. No epsilon in range caused misclassification.")
 
 
     def display_attack_results(self, original_image, perturbation, adversarial_image, 
@@ -242,7 +231,7 @@ def main():
     # Create FGSM attack instance, can adjust epsilon here
     fgsm = FGSM(epsilon=0.05)
     
-    fgsm.attack(image_path)
+    fgsm.auto_tune_attack(image_path)
 
 if __name__ == "__main__":
     main()
