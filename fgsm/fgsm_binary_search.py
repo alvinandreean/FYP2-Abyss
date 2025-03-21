@@ -139,8 +139,14 @@ class FGSM:
         end_time = time.time()
         print(f"Attack completed in {end_time - start_time:.2f} seconds")
 
-    def auto_tune_attack(self, image_path, epsilon_start=0.001, epsilon_end=1, step=0.001):
+    def auto_tune_attack(self, image_path, epsilon_min=0.001, epsilon_max=1, precision=0.0001, max_iterations=30):
+        """
+        Auto-tune the epsilon parameter to find the minimum value that causes misclassification.
+        Uses binary search for efficiency.
+        """
+        # Start timer
         start_time = time.time()
+        
         output_dir = "fgsm_results"
         os.makedirs(output_dir, exist_ok=True)
 
@@ -162,36 +168,97 @@ class FGSM:
 
         # Precompute perturbations
         perturbations = self.create_adversarial_pattern(image, target)
-
-        # Generate adversarial images for all epsilon values
-        epsilons = np.arange(epsilon_start, epsilon_end + step, step)
-        adversarial_images = [tf.clip_by_value(image + eps * perturbations, -1, 1) for eps in epsilons]
-        adversarial_images = tf.concat(adversarial_images, axis=0)
-
-        # Predict all adversarial images in one batch
-        adv_probs_batch = self.model.predict(adversarial_images, verbose=0)
-
-        # Check for misclassification
-        for i, eps in enumerate(epsilons):
-            adv_probs = adv_probs_batch[i:i+1]
+        
+        # First, verify if attack is possible within the range
+        max_adv_image = tf.clip_by_value(image + epsilon_max * perturbations, -1, 1)
+        max_probs = self.model.predict(max_adv_image, verbose=0)
+        _, max_class, max_conf = self.get_imagenet_label(max_probs)
+        
+        if max_class == orig_class:
+            print(f"❌ Even maximum ε={epsilon_max} doesn't change classification.")
+            print(f"Try increasing the maximum epsilon value.")
+            end_time = time.time()
+            print(f"⏱️ Auto-tune completed in {end_time - start_time:.2f} seconds")
+            return None
+        
+        # Initialize binary search
+        left, right = epsilon_min, epsilon_max
+        best_epsilon = None
+        best_adv_image = None
+        best_adv_class = None
+        best_adv_conf = None
+        
+        iterations = 0
+        
+        print(f"Starting binary search with ε range [{epsilon_min}, {epsilon_max}]")
+        
+        # binary search
+        while (right - left) > precision and iterations < max_iterations:
+            iterations += 1
+            mid = (left + right) / 2
+            print(f"Iteration {iterations}: Trying ε = {mid:.6f}")
+            
+            # Create adversarial image with current epsilon
+            adv_image = tf.clip_by_value(image + mid * perturbations, -1, 1)
+            
+            # Check if attack succeeds
+            adv_probs = self.model.predict(adv_image, verbose=0)
             _, adv_class, adv_conf = self.get_imagenet_label(adv_probs)
-            print(f"Epsilon: {eps:.4f}, Adversarial Class: {adv_class} | Confidence: {adv_conf * 100:.2f}%")
-
+            
+            print(f"  Class: {adv_class}, Confidence: {adv_conf*100:.2f}%")
+            
             if adv_class != orig_class:
-                print(f"\n✅ Attack successful! Minimum ε = {eps:.4f}")
-                print(f"Adversarial Class: {adv_class} | Confidence: {adv_conf * 100:.2f}%")
-                self.display_attack_results(
-                    image, perturbations, adversarial_images[i:i+1],
-                    orig_class, adv_class, orig_conf, adv_conf,
-                    output_dir
-                )
-                end_time = time.time()
-                print(f"Attack completed in {end_time - start_time:.2f} seconds")
-                return
-
-        print("\n❌ Attack failed. No epsilon in range caused misclassification.")
+                # Attack succeeded, try smaller epsilon
+                print(f"  ✓ Attack succeeded!")
+                best_epsilon = mid
+                best_adv_image = adv_image
+                best_adv_class = adv_class
+                best_adv_conf = adv_conf
+                right = mid
+            else:
+                # Attack failed, try larger epsilon
+                print(f"  ✗ Attack failed")
+                left = mid
+        
+        # Final verification at the boundary
+        if best_epsilon is not None:
+            # Check if there's a smaller epsilon that works
+            verify_eps = max(epsilon_min, best_epsilon - precision)
+            verify_image = tf.clip_by_value(image + verify_eps * perturbations, -1, 1)
+            verify_probs = self.model.predict(verify_image, verbose=0)
+            _, verify_class, verify_conf = self.get_imagenet_label(verify_probs)
+            
+            if verify_class != orig_class:
+                # Found even smaller epsilon
+                print(f"Found even smaller working epsilon: {verify_eps:.6f}")
+                best_epsilon = verify_eps
+                best_adv_image = verify_image
+                best_adv_class = verify_class
+                best_adv_conf = verify_conf
+        
+        # End timer
         end_time = time.time()
-        print(f"Attack completed in {end_time - start_time:.2f} seconds")
+        duration = end_time - start_time
+        
+        if best_epsilon is not None:
+            print(f"\n✅ Attack successful! Minimum ε ≈ {best_epsilon:.6f}")
+            print(f"Adversarial Class: {best_adv_class} | Confidence: {best_adv_conf * 100:.2f}%")
+            print(f"⏱️ Auto-tune completed in {duration:.2f} seconds ({iterations} iterations)")
+            
+            # Update epsilon to use for display
+            self.epsilon = best_epsilon
+            
+            # Display results with minimum successful epsilon
+            self.display_attack_results(
+                image, perturbations, best_adv_image,
+                orig_class, best_adv_class, orig_conf, best_adv_conf,
+                output_dir
+            )
+            return best_epsilon
+        else:
+            print(f"\n❌ Attack failed. No epsilon in range caused misclassification.")
+            print(f"⏱️ Auto-tune completed in {duration:.2f} seconds ({iterations} iterations)")
+            return None
 
 
     def display_attack_results(self, original_image, perturbation, adversarial_image, 
