@@ -1,15 +1,13 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import base64
-import io
-from PIL import Image
-import numpy as np
+import os
 from fgsm import FGSM  # import your FGSM class
 
 app = Flask(__name__)
-CORS(app)  # enable CORS so React can call the API
+CORS(app)
 
-# Initialize FGSM with default settings (adjust epsilon or model as needed)
+# Create a global FGSM instance with some default (will be overwritten anyway)
 fgsm = FGSM(epsilon=0.05, model_name='mobilenet_v2')
 
 @app.route('/attack', methods=['POST'])
@@ -17,26 +15,45 @@ def attack():
     if 'image' not in request.files:
         return jsonify({'error': 'No image provided'}), 400
 
-    image_file = request.files['image']
+    # Get the posted form data
+    epsilon_str = request.form.get('epsilon', '0.05')
+    auto_tune_str = request.form.get('autoTune', 'false')
     
-    # Save the image temporarily or process it in-memory
+    epsilon_value = float(epsilon_str)
+    auto_tune = auto_tune_str.lower() == 'true'
+
+    # Save the image
+    image_file = request.files['image']
+    filepath = "temp_image.jpg"
+    image_file.save(filepath)
+
+    # Run either auto-tune or normal FGSM
     try:
-        # Option 1: Save the image temporarily
-        filepath = "temp_image.jpg"
-        image_file.save(filepath)
+        if auto_tune:
+            best_epsilon = fgsm.auto_tune_attack(filepath)
+            used_epsilon = best_epsilon
+        else:
+            fgsm.epsilon = epsilon_value
+            fgsm.attack(filepath)
+            used_epsilon = epsilon_value
         
-        # Run the auto-tune FGSM attack
-        best_epsilon = fgsm.auto_tune_attack(filepath)
-        
-        # Load the adversarial result image from file (or modify FGSM to return image arrays)
+        # The FGSM class in your code saves the final image as "fgsm_attack_results.png".
+        # Adjust the path if needed, especially if you change output directory or model name.
         result_path = "fgsm_results/mobilenet_v2/fgsm_attack_results.png"
-        with open(result_path, "rb") as img_file:
-            b64_image = base64.b64encode(img_file.read()).decode('utf-8')
         
+        # Convert the result image to base64
+        if os.path.exists(result_path):
+            with open(result_path, "rb") as img_file:
+                b64_image = base64.b64encode(img_file.read()).decode('utf-8')
+        else:
+            return jsonify({'error': 'Result image not found'}), 500
+        
+        # TODO: If your FGSM class returns the actual classes and confidences, 
+        # you can pass them here. For now, placeholders:
         response = {
-            "epsilon": best_epsilon,
-            "original_class": "/* add original class info */",
-            "adversarial_class": "/* add adversarial class info */",
+            "epsilon": used_epsilon,
+            "original_class": "OriginalClassPlaceholder",
+            "adversarial_class": "AdversarialClassPlaceholder",
             "result_image": b64_image
         }
         return jsonify(response)
