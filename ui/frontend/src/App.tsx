@@ -1,57 +1,67 @@
-import React, { useState, ChangeEvent } from 'react';
-import axios from 'axios';
+import React, { useState } from 'react';
+import AttackForm from './components/AttackForm';
+import ImagePreview from './components/ImagePreview';
+import ResultsDisplay from './components/ResultsDisplay'; 
+import { AttackResult } from './types';
 
 const App: React.FC = () => {
+  // States for file and preview
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [resultImage, setResultImage] = useState<string | null>(null);
-  const [attackInfo, setAttackInfo] = useState<any>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string>('mobilenet_v2');
 
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setSelectedFile(e.target.files[0]);
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedFile) return;
-
-    const formData = new FormData();
-    formData.append('image', selectedFile);
-
-    try {
-      const response = await axios.post('http://localhost:5000/attack', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      });
-      
-      setAttackInfo(response.data);
-      setResultImage(`data:image/png;base64,${response.data.result_image}`);
-    } catch (error) {
-      console.error(error);
-    }
-  };
+  
+  // States for attack results
+  const [results, setResults] = useState<AttackResult | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
   return (
-    <div style={{ textAlign: 'center' }}>
-      <h1>FGSM Adversarial Attack</h1>
-      <form onSubmit={handleSubmit}>
-        <input type="file" accept="image/*" onChange={handleFileChange} />
-        <button type="submit">Run Attack</button>
-      </form>
-      {attackInfo && (
-        <div>
-          <p>Epsilon: {attackInfo.epsilon}</p>
-          <p>Original Class: {attackInfo.original_class}</p>
-          <p>Adversarial Class: {attackInfo.adversarial_class}</p>
-        </div>
-      )}
-      {resultImage && (
-        <div>
-          <img src={resultImage} alt="Attack Result" style={{ maxWidth: '80%' }} />
-        </div>
-      )}
+    <div
+      style={{
+        display: 'flex',
+        minHeight: '100vh',
+        backgroundColor: '#222',
+        color: '#fff',
+        padding: '20px'
+      }}
+    >
+      {/* Left Panel */}
+      <div
+        style={{
+          width: '450px',
+          backgroundColor: '#333',
+          padding: '20px',
+          borderRadius: '8px',
+          marginRight: '20px'
+        }}
+      >
+        <h1>Fast Gradient Sign Method</h1>
+        <AttackForm 
+          selectedFile={selectedFile}
+          setSelectedFile={setSelectedFile}
+          setPreview={setPreview}
+          setResults={setResults}
+          setIsLoading={setIsLoading}
+        />
+
+        {/* Image Preview */}
+        {preview && (
+          <ImagePreview preview={preview} />
+        )}
+      </div>
+
+      {/* Right Panel */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <h2>Attack Results</h2>
+        
+        {isLoading ? (
+          <div style={{ textAlign: 'center', marginTop: '50px' }}>
+            <p>Processing attack...</p>
+          </div>
+        ) : (
+          results && <ResultsDisplay results={results} />
+        )}
+      </div>
     </div>
   );
 };
