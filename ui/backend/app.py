@@ -6,37 +6,35 @@ from fgsm import FGSM  # import your modified FGSM class
 app = Flask(__name__)
 CORS(app)
 
-# Create a global FGSM instance with default settings
-fgsm = FGSM(epsilon=0.05, model_name='mobilenet_v2')
-
 @app.route('/attack', methods=['POST'])
 def attack():
-    if 'image' not in request.files:
-        return jsonify({'error': 'No image provided'}), 400
+    if 'image' not in request.files or 'model' not in request.form:
+        return jsonify({'error': 'No image or model provided'}), 400
 
-    epsilon_str = request.form.get('epsilon', '0.05')
-    auto_tune_str = request.form.get('autoTune', 'false')
-    epsilon_value = float(epsilon_str)
-    auto_tune = auto_tune_str.lower() == 'true'
+    model_name = request.form['model']  # Get the model name from the request
+    epsilon_value = float(request.form.get('epsilon', 0.05))
+    auto_tune = request.form.get('autoTune', 'false').lower() == 'true'
 
+    # Initialize the FGSM class with the selected model
+    fgsm = FGSM(epsilon=epsilon_value, model_name=model_name)
+
+    # Process the image and run the attack
     image_file = request.files['image']
-    filepath = "temp_image.jpg"  # Temporary storage if needed
-    image_file.save(filepath)
+    image_path = "temp_image.jpg"
+    image_file.save(image_path)
 
-    try:
-        if auto_tune:
-            results = fgsm.auto_tune_attack(filepath)
-        else:
-            fgsm.epsilon = epsilon_value
-            results = fgsm.attack(filepath)
+    # Choose attack method based on autoTune flag
+    if auto_tune:
+        results = fgsm.auto_tune_attack(image_path)
+    else:
+        fgsm.epsilon = epsilon_value
+        results = fgsm.attack(image_path)
 
-        if not results:
-            return jsonify({'error': 'Attack failed'}), 500
-
-        # Return the entire results dictionary
+    if results:
         return jsonify(results)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    else:
+        return jsonify({'error': 'Attack failed'}), 500
+
 
 if __name__ == '__main__':
     app.run(debug=True)

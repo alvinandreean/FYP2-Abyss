@@ -134,80 +134,96 @@ class FGSM:
         )
         end_time = time.time()
         print(f"Attack completed in {end_time - start_time:.2f} seconds")
-
+        print("Model Name:", self.model_name)
         # We can also attach epsilon or other info
         results["epsilon_used"] = self.epsilon
         return results
 
-    def auto_tune_attack(self, image_path, epsilon_min=0.0001, epsilon_max=1, precision=0.0001, max_iterations=500, min_confidence=0.01):
+    def auto_tune_attack(self, image_path, epsilon_min=0.0001, epsilon_max=1, coarse_step=0.05, fine_step=0.001, min_confidence=0.01):
         start_time = time.time()
+
+        print(self.model_name.upper())
         try:
             image = self.preprocess(image_path)
         except Exception as e:
             print(f"Error preprocessing image: {e}")
             return None, None, None, None
+
         image_probs = self.model.predict(image, verbose=0)
         _, orig_class, orig_conf = self.get_imagenet_label(image_probs)
         print(f"Original Prediction: {orig_class} ({orig_conf * 100:.2f}%)")
+
         predicted_class_idx = tf.argmax(image_probs[0]).numpy()
         target = tf.one_hot(predicted_class_idx, image_probs.shape[-1])
         target = tf.reshape(target, (1, image_probs.shape[-1]))
+
         perturbations = self.create_adversarial_pattern(image, target)
-        max_adv_image = tf.clip_by_value(image + epsilon_max * perturbations, -1, 1)
-        max_probs = self.model.predict(max_adv_image, verbose=0)
-        _, max_class, max_conf = self.get_imagenet_label(max_probs)
-        if max_class == orig_class or max_conf < min_confidence:
-            print(f"❌ Maximum ε={epsilon_max} doesn't produce a reliable attack.")
-            end_time = time.time()
-            print(f"⏱️ Auto-tune completed in {end_time - start_time:.2f} seconds")
-            return None, None, None, None
-        left, right = epsilon_min, epsilon_max
+
         best_epsilon = None
         best_adv_image = None
         best_adv_class = None
         best_adv_conf = None
-        iterations = 0
-        print(f"Starting binary search with ε range [{epsilon_min}, {epsilon_max}]")
-        print(f"Looking for adversarial examples with at least {min_confidence*100:.0f}% confidence")
-        while (right - left) > precision and iterations < max_iterations:
-            iterations += 1
-            mid = (left + right) / 2
-            print(f"Iteration {iterations}: Trying ε = {mid:.6f}")
-            adv_image = tf.clip_by_value(image + mid * perturbations, -1, 1)
+
+        # Step 1: Coarse search (larger step to quickly find a good epsilon range)
+        epsilon = epsilon_min
+        while epsilon <= epsilon_max:
+            adv_image = tf.clip_by_value(image + epsilon * perturbations, -1, 1)
             adv_probs = self.model.predict(adv_image, verbose=0)
             _, adv_class, adv_conf = self.get_imagenet_label(adv_probs)
-            print(f"  Class: {adv_class}, Confidence: {adv_conf*100:.2f}%")
+
+            print(f"Coarse Search: Trying ε = {epsilon:.5f} -> Class: {adv_class}, Confidence: {adv_conf*100:.2f}%")
+
+            # If we find a misclassification with sufficient confidence, stop
             if adv_class != orig_class and adv_conf >= min_confidence:
-                print(f"  ✓ Attack succeeded with sufficient confidence!")
-                best_epsilon = mid
+                print(f"  ✓ Coarse Search: Attack succeeded with sufficient confidence!")
+                best_epsilon = epsilon
                 best_adv_image = adv_image
                 best_adv_class = adv_class
                 best_adv_conf = adv_conf
-                right = mid
-            else:
-                left = mid
+                break
+
+            epsilon += coarse_step
+
+        # Step 2: Fine search (narrow down epsilon with small steps)
         if best_epsilon is not None:
-            verify_eps = max(epsilon_min, best_epsilon - precision)
-            verify_image = tf.clip_by_value(image + verify_eps * perturbations, -1, 1)
-            verify_probs = self.model.predict(verify_image, verbose=0)
-            _, verify_class, verify_conf = self.get_imagenet_label(verify_probs)
-            if verify_class != orig_class and verify_conf >= min_confidence:
-                print(f"Found even smaller working epsilon: {verify_eps:.6f} with {verify_conf*100:.2f}% confidence")
-                best_epsilon = verify_eps
-                best_adv_image = verify_image
-                best_adv_class = verify_class
-                best_adv_conf = verify_conf
+            # Fine search (narrowing down epsilon in small steps)
+            epsilon_start = max(epsilon_min, best_epsilon - coarse_step)  # Start from the last candidate
+            epsilon_end = min(epsilon_max, best_epsilon + coarse_step)    # Limit the epsilon range
+            epsilon = epsilon_start
+
+            while epsilon <= epsilon_end:
+                adv_image = tf.clip_by_value(image + epsilon * perturbations, -1, 1)
+                adv_probs = self.model.predict(adv_image, verbose=0)
+                _, adv_class, adv_conf = self.get_imagenet_label(adv_probs)
+
+                print(f"Fine Search: Trying ε = {epsilon:.6f} -> Class: {adv_class}, Confidence: {adv_conf*100:.2f}%")
+
+                if adv_class != orig_class and adv_conf >= min_confidence:
+                    best_epsilon = epsilon
+                    best_adv_image = adv_image
+                    best_adv_class = adv_class
+                    best_adv_conf = adv_conf
+                    break
+
+                epsilon += fine_step
+
         end_time = time.time()
         duration = end_time - start_time
+
         if best_epsilon is not None:
-                self.epsilon = best_epsilon
-                results = self.display_attack_results(
-                    image, perturbations, best_adv_image,
-                    orig_class, best_adv_class, orig_conf, best_adv_conf
-                )
-                results["epsilon_used"] = best_epsilon
-                return results
+            print(f"\n✅ Attack successful! Minimum ε ≈ {best_epsilon:.6f}")
+            print(f"Adversarial Class: {best_adv_class} | Confidence: {best_adv_conf * 100:.2f}%")
+            print(f"⏱️ Auto-tune completed in {duration:.2f} seconds")
+
+            results = self.display_attack_results(
+                image, perturbations, best_adv_image,
+                orig_class, best_adv_class, orig_conf, best_adv_conf
+            )
+            results["epsilon_used"] = best_epsilon
+            return results
         else:
+            print(f"\n❌ Attack failed. No epsilon in range caused misclassification with {min_confidence*100:.0f}% confidence.")
+            print(f"⏱️ Auto-tune completed in {duration:.2f} seconds")
             return None
 
     def display_attack_results(self, original_image, perturbation, adversarial_image, 
