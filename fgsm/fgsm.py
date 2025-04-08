@@ -1,5 +1,4 @@
 import tensorflow as tf
-import matplotlib
 import matplotlib.pyplot as plt
 import os
 from PIL import Image
@@ -7,21 +6,59 @@ import numpy as np
 import time
 
 class FGSM:
-    def __init__(self, epsilon=0.05):
+    def __init__(self, epsilon=0.05, model_name='mobilenet_v2'):
         """
         Initialize FGSM attack.
         Args:
             epsilon: perturbation magnitude
         """
         self.epsilon = epsilon
+        self.model_name = model_name.lower()
+        self.model = None
+        self.image_size = (0, 0)
         print("Loading pretrained model...")
-        self.model = tf.keras.applications.MobileNetV2(include_top=True, weights='imagenet')
+        
+        self.load_model()
         self.model.trainable = False
-        self.decode_predictions = tf.keras.applications.mobilenet_v2.decode_predictions
+        
+        
+    def load_model(self):
+        """ 
+        Load the specified pretrained model.
+        
+        
+        """
+        if self.model_name == 'mobilenet_v2': # Load MobileNetV2
+            self.model = tf.keras.applications.MobileNetV2(include_top=True, weights='imagenet')
+            self.decode_predictions = tf.keras.applications.mobilenet_v2.decode_predictions
+            self.preprocess_input = tf.keras.applications.mobilenet_v2.preprocess_input
+            self.image_size = (224, 224)
+            
+        elif self.model_name == 'inception_v3':
+            self.model = tf.keras.applications.InceptionV3(include_top=True, weights='imagenet')
+            self.decode_predictions = tf.keras.applications.inception_v3.decode_predictions
+            self.preprocess_input = tf.keras.applications.inception_v3.preprocess_input
+            self.image_size = (299, 299)
+            
+        elif self.model_name == 'vgg19': # Load VGG19
+            self.model = tf.keras.applications.VGG19(include_top=True, weights='imagenet')
+            self.decode_predictions = tf.keras.applications.vgg19.decode_predictions
+            self.preprocess_input = tf.keras.applications.vgg19.preprocess_input
+            self.image_size = (224, 224)
+            
+        elif self.model_name == 'densenet121': # Load DenseNet121
+            self.model = tf.keras.applications.DenseNet121(include_top=True, weights='imagenet')
+            self.decode_predictions = tf.keras.applications.densenet.decode_predictions
+            self.preprocess_input = tf.keras.applications.densenet.preprocess_input
+            self.image_size = (224, 224)
+            
+        else:
+            raise ValueError("Unsupported model.")
+            
 
     def preprocess(self, image_input):
         """
-        Preprocess the image using Pillow and convert for MobileNetV2.
+        Preprocess the image using Pillow and convert for the selected model.
         
         Args:
             image_input: Can be a file path string or a tensor from tf.io.read_file
@@ -49,19 +86,19 @@ class FGSM:
             raise TypeError("Image input must be a file path or a tensor")
         
         # Convert to RGB if it's not already
-        if pil_image.mode != 'RGB':
+        if (pil_image.mode != 'RGB'):
             pil_image = pil_image.convert('RGB')
         
-        # Resize using PIL's high-quality resampling
-        pil_image = pil_image.resize((224, 224), Image.Resampling.LANCZOS)
+        # Resize using PIL's high-quality resampling to the model's required size
+        pil_image = pil_image.resize(self.image_size, Image.Resampling.LANCZOS)
         
         # Convert to numpy array
         image_array = np.array(pil_image)
         
-        # Convert to TensorFlow tensor and apply MobileNetV2 preprocessing
+        # Convert to TensorFlow tensor and apply model-specific preprocessing
         image = tf.convert_to_tensor(image_array)
         image = tf.cast(image, tf.float32)
-        image = tf.keras.applications.mobilenet_v2.preprocess_input(image)
+        image = self.preprocess_input(image)
         
         # Add batch dimension
         image = image[None, ...]
@@ -120,11 +157,15 @@ class FGSM:
 
         # Generate the perturbation 
         perturbations = self.create_adversarial_pattern(image, target)
-        
         # Apply the perturbation to the image
         adversarial_image = image + self.epsilon * perturbations
-        adversarial_image = tf.clip_by_value(adversarial_image, -1, 1)
-        
+
+        # Clip based on model's preprocessing requirements
+        if self.model_name in ['mobilenet_v2', 'inception_v3', 'vgg19', 'densenet121']:
+            adversarial_image = tf.clip_by_value(adversarial_image, -1, 1)
+        else:
+            NotImplementedError("Model not supported for clipping.")
+            
         # Get adversarial prediction from the model
         adv_probs = self.model.predict(adversarial_image, verbose=0)
         _, adv_class, adv_conf = self.get_imagenet_label(adv_probs)
@@ -139,9 +180,23 @@ class FGSM:
         end_time = time.time()
         print(f"Attack completed in {end_time - start_time:.2f} seconds")
 
-    def auto_tune_attack(self, image_path, epsilon_start=0.001, epsilon_end=1, step=0.001):
+    def auto_tune_attack(self, image_path, epsilon_min=0.0001, epsilon_max=1, precision=0.0001, max_iterations=500, min_confidence=0.01):
+        """
+        Auto-tune the epsilon parameter to find the minimum value that causes misclassification.
+        Uses binary search for efficiency.
+        
+        Args:
+            image_path: Path to the input image
+            epsilon_min: Minimum epsilon value to try
+            epsilon_max: Maximum epsilon value to try
+            precision: Precision of the binary search
+            max_iterations: Maximum number of iterations
+            min_confidence: Minimum confidence required for the adversarial class (0-1)
+        """
+        # Start timer
         start_time = time.time()
-        output_dir = "fgsm_results"
+        
+        output_dir = f"fgsm_results_{self.model_name}"
         os.makedirs(output_dir, exist_ok=True)
 
         try:
@@ -162,47 +217,119 @@ class FGSM:
 
         # Precompute perturbations
         perturbations = self.create_adversarial_pattern(image, target)
-
-        # Generate adversarial images for all epsilon values
-        epsilons = np.arange(epsilon_start, epsilon_end + step, step)
-        adversarial_images = [tf.clip_by_value(image + eps * perturbations, -1, 1) for eps in epsilons]
-        adversarial_images = tf.concat(adversarial_images, axis=0)
-
-        # Predict all adversarial images in one batch
-        adv_probs_batch = self.model.predict(adversarial_images, verbose=0)
-
-        # Check for misclassification
-        for i, eps in enumerate(epsilons):
-            adv_probs = adv_probs_batch[i:i+1]
+        
+        # First, verify if attack is possible within the range
+        max_adv_image = tf.clip_by_value(image + epsilon_max * perturbations, -1, 1)
+        max_probs = self.model.predict(max_adv_image, verbose=0)
+        _, max_class, max_conf = self.get_imagenet_label(max_probs)
+        
+        if max_class == orig_class or max_conf < min_confidence:
+            print(f"❌ Maximum ε={epsilon_max} doesn't produce a reliable attack.")
+            print(f"  Maximum epsilon produces class {max_class} with {max_conf*100:.2f}% confidence.")
+            print(f"  Try increasing the maximum epsilon value or decreasing the confidence threshold.")
+            end_time = time.time()
+            print(f"⏱️ Auto-tune completed in {end_time - start_time:.2f} seconds")
+            return None
+        
+        # Initialize binary search
+        left, right = epsilon_min, epsilon_max
+        best_epsilon = None
+        best_adv_image = None
+        best_adv_class = None
+        best_adv_conf = None
+        
+        iterations = 0
+        
+        print(f"Starting binary search with ε range [{epsilon_min}, {epsilon_max}]")
+        print(f"Looking for adversarial examples with at least {min_confidence*100:.0f}% confidence")
+        
+        # binary search
+        while (right - left) > precision and iterations < max_iterations:
+            iterations += 1
+            mid = (left + right) / 2
+            print(f"Iteration {iterations}: Trying ε = {mid:.6f}")
+            
+            # Create adversarial image with current epsilon
+            adv_image = tf.clip_by_value(image + mid * perturbations, -1, 1)
+            
+            # Check if attack succeeds
+            adv_probs = self.model.predict(adv_image, verbose=0)
             _, adv_class, adv_conf = self.get_imagenet_label(adv_probs)
-            print(f"Epsilon: {eps:.4f}, Adversarial Class: {adv_class} | Confidence: {adv_conf * 100:.2f}%")
-
-            if adv_class != orig_class:
-                print(f"\n✅ Attack successful! Minimum ε = {eps:.4f}")
-                print(f"Adversarial Class: {adv_class} | Confidence: {adv_conf * 100:.2f}%")
-                self.display_attack_results(
-                    image, perturbations, adversarial_images[i:i+1],
-                    orig_class, adv_class, orig_conf, adv_conf,
-                    output_dir
-                )
-                end_time = time.time()
-                print(f"Attack completed in {end_time - start_time:.2f} seconds")
-                return
-
-        print("\n❌ Attack failed. No epsilon in range caused misclassification.")
+            
+            print(f"  Class: {adv_class}, Confidence: {adv_conf*100:.2f}%")
+            
+            if adv_class != orig_class and adv_conf >= min_confidence:
+                # Attack succeeded with sufficient confidence, try smaller epsilon
+                print(f"  ✓ Attack succeeded with sufficient confidence!")
+                best_epsilon = mid
+                best_adv_image = adv_image
+                best_adv_class = adv_class
+                best_adv_conf = adv_conf
+                right = mid
+            else:
+                # Attack failed or insufficient confidence, try larger epsilon
+                if adv_class != orig_class:
+                    print(f"  ⚠ Attack succeeded but confidence too low ({adv_conf*100:.2f}% < {min_confidence*100:.0f}%)")
+                else:
+                    print(f"  ✗ Attack failed")
+                left = mid
+        
+        # Final verification at the boundary
+        if best_epsilon is not None:
+            # Check if there's a smaller epsilon that works
+            verify_eps = max(epsilon_min, best_epsilon - precision)
+            verify_image = tf.clip_by_value(image + verify_eps * perturbations, -1, 1)
+            verify_probs = self.model.predict(verify_image, verbose=0)
+            _, verify_class, verify_conf = self.get_imagenet_label(verify_probs)
+            
+            if verify_class != orig_class and verify_conf >= min_confidence:
+                # Found even smaller epsilon with sufficient confidence
+                print(f"Found even smaller working epsilon: {verify_eps:.6f} with {verify_conf*100:.2f}% confidence")
+                best_epsilon = verify_eps
+                best_adv_image = verify_image
+                best_adv_class = verify_class
+                best_adv_conf = verify_conf
+        
+        # End timer
         end_time = time.time()
-        print(f"Attack completed in {end_time - start_time:.2f} seconds")
+        duration = end_time - start_time
+        
+        if best_epsilon is not None:
+            print(f"\n✅ Attack successful! Minimum ε ≈ {best_epsilon:.6f}")
+            print(f"Adversarial Class: {best_adv_class} | Confidence: {best_adv_conf * 100:.2f}%")
+            print(f"⏱️ Auto-tune completed in {duration:.2f} seconds ({iterations} iterations)")
+            
+            # Update epsilon to use for display
+            self.epsilon = best_epsilon
+            
+            # Display results with minimum successful epsilon
+            self.display_attack_results(
+                image, perturbations, best_adv_image,
+                orig_class, best_adv_class, orig_conf, best_adv_conf,
+                output_dir
+            )
+            return best_epsilon
+        else:
+            print(f"\n❌ Attack failed. No epsilon in range caused misclassification with {min_confidence*100:.0f}% confidence.")
+            print(f"⏱️ Auto-tune completed in {duration:.2f} seconds ({iterations} iterations)")
+            return None
 
 
     def display_attack_results(self, original_image, perturbation, adversarial_image, 
-                             orig_class, adv_class, orig_conf, adv_conf, output_dir):
+                            orig_class, adv_class, orig_conf, adv_conf, output_dir):
         """Display and save attack results in a single, detailed figure."""
 
-        plt.figure(figsize=(20, 7))
+
+        # For MobileNetV2, InceptionV3, 
+        display_original = np.clip(original_image[0] * 0.5 + 0.5, 0, 1)
+        display_adv = np.clip(adversarial_image[0] * 0.5 + 0.5, 0, 1)
+        display_pert = np.clip(perturbation[0] * 0.5 + 0.5, 0, 1)
         
+        plt.figure(figsize=(20, 7))
+            
         # Original image
         plt.subplot(1, 3, 1)
-        plt.imshow(original_image[0] * 0.5 + 0.5)
+        plt.imshow(display_original)
         plt.title('Original Image', fontsize=14, pad=10)
         plt.axis('off')
         plt.text(0.5, -0.15, f'Class: {orig_class}\nConfidence: {orig_conf*100:.2f}%', 
@@ -211,7 +338,7 @@ class FGSM:
         
         # Perturbation
         plt.subplot(1, 3, 2)
-        plt.imshow(perturbation[0] * 0.5 + 0.5)
+        plt.imshow(display_pert)
         plt.title('Perturbation', fontsize=14, pad=10)
         plt.axis('off')
         plt.text(0.5, -0.15, f'ε = {self.epsilon}', 
@@ -220,7 +347,7 @@ class FGSM:
         
         # Adversarial image
         plt.subplot(1, 3, 3)
-        plt.imshow(adversarial_image[0] * 0.5 + 0.5)
+        plt.imshow(display_adv)
         plt.title('Adversarial Image', fontsize=14, pad=10)
         plt.axis('off')
         plt.text(0.5, -0.15, f'Class: {adv_class}\nConfidence: {adv_conf*100:.2f}%', 
@@ -238,15 +365,20 @@ class FGSM:
 
 def main():
     # image_path = "image/animals/val/dog/dog1.jpg"  # Change image path here
-    image_path = "image/ferrari.jpeg"
+    image_path = "image/ferrari.jpeg"  # Change image path here
     
-    # Create FGSM attack instance, can adjust epsilon here
-    fgsm = FGSM(epsilon=0.05)
+    # Test with multiple models
+    models = ['mobilenet_v2', 'inception_v3'] # 'vgg19', 'densenet121', resnet50 WIP
     
-    fgsm.auto_tune_attack(image_path)
+    for model_name in models:
+        print(f"\n{'='*50}\nTesting with {model_name.upper()}\n{'='*50}")
+        # Create FGSM attack instance for current model
+        fgsm = FGSM(epsilon=0.05, model_name=model_name)
+        
+        # Run auto-tuning attack
+        fgsm.auto_tune_attack(image_path)
 
 if __name__ == "__main__":
     main()
-    
-    
-    
+
+
