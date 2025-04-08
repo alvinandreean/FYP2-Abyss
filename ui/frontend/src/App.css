@@ -1,8 +1,9 @@
+/* Instead, give root full width by default: */
 #root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  text-align: center; /* optional, if you want global text alignment */
 }
 
 .logo {

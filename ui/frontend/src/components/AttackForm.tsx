@@ -2,6 +2,7 @@ import React, { useState, ChangeEvent } from 'react';
 import axios from 'axios';
 import { AttackResult } from '../types';
 import ModelSelector from './ModelSelector';
+import { useNavigate } from 'react-router-dom';
 
 interface AttackFormProps {
   selectedFile: File | null;
@@ -18,23 +19,21 @@ const AttackForm: React.FC<AttackFormProps> = ({
   setResults,
   setIsLoading
 }) => {
-  // Local state for epsilon, autoTune and the selected model
   const [epsilon, setEpsilon] = useState<number>(0.05);
   const [autoTune, setAutoTune] = useState<boolean>(false);
-  // Use model values that match backend expected values (lowercase with underscores or similar)
   const [selectedModel, setSelectedModel] = useState<string>("mobilenet_v2");
 
-  // Handle file input change: update selected file and preview URL
+  // Get a navigate function from React Router:
+  const navigate = useNavigate();
+
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const file = e.target.files[0];
       setSelectedFile(file);
-      const objectUrl = URL.createObjectURL(file);
-      setPreview(objectUrl);
+      setPreview(URL.createObjectURL(file));
     }
   };
 
-  // Handle form submission: send all form data to the backend
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedFile) return;
@@ -43,9 +42,9 @@ const AttackForm: React.FC<AttackFormProps> = ({
     const formData = new FormData();
     formData.append('image', selectedFile);
     formData.append('autoTune', autoTune.toString());
-    formData.append('model', selectedModel); // Pass selected model to backend
-    
-    // Only include epsilon in the request if autoTune is disabled
+    formData.append('model', selectedModel);
+
+    // Only include epsilon if autoTune is NOT checked
     if (!autoTune) {
       formData.append('epsilon', epsilon.toString());
     }
@@ -54,18 +53,21 @@ const AttackForm: React.FC<AttackFormProps> = ({
       const res = await axios.post('http://localhost:5000/attack', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-
       const data = res.data;
-      
-      // Process returned images to add the data URL prefix
-      const processedResults = {
+
+      const processedResults: AttackResult = {
         ...data,
+        // Convert returned strings to data URLs:
         original_image: `data:image/png;base64,${data.original_image}`,
         perturbation_image: `data:image/png;base64,${data.perturbation_image}`,
         adversarial_image: `data:image/png;base64,${data.adversarial_image}`
       };
-      
+
+      // Set the results in local state if you still want it in AttackPage
       setResults(processedResults);
+
+      // Navigate to /results and pass the processedResults in 'state'
+      navigate('/results', { state: { results: processedResults } });
     } catch (error) {
       console.error("Error processing attack:", error);
       alert('Error processing attack');
@@ -80,13 +82,13 @@ const AttackForm: React.FC<AttackFormProps> = ({
       <div style={{ marginBottom: '40px' }}>
         <input type="file" accept="image/*" onChange={handleFileChange} />
       </div>
-      
+
       {/* Model Selector */}
       <ModelSelector 
         selectedModel={selectedModel}
         setSelectedModel={setSelectedModel}
       />
-      
+
       {/* Epsilon Slider */}
       <div style={{ marginBottom: '40px' }}>
         <label style={{ marginRight: '5px' }}>
@@ -102,7 +104,7 @@ const AttackForm: React.FC<AttackFormProps> = ({
           style={{ width: '100%' }}
         />
       </div>
-      
+
       {/* Auto-Tune Checkbox */}
       <div style={{ marginBottom: '40px' }}>
         <label style={{ marginRight: '10px' }}>
@@ -115,7 +117,7 @@ const AttackForm: React.FC<AttackFormProps> = ({
           Auto-Tune Epsilon
         </label>
       </div>
-      
+
       {/* Submit Button */}
       <button 
         type="submit" 

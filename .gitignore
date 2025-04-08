@@ -33,7 +33,7 @@ env.bak/
 venv.bak/
 .myenv
 *.env
-
+myvenv/
 # --- Unit test / coverage reports ---
 .tox/
 .nox/

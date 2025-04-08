@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
-from fgsm import FGSM  # import your modified FGSM class
+from fgsm import FGSM  # your FGSM class
 
 app = Flask(__name__)
 CORS(app)
@@ -11,19 +11,19 @@ def attack():
     if 'image' not in request.files or 'model' not in request.form:
         return jsonify({'error': 'No image or model provided'}), 400
 
-    model_name = request.form['model']  # Get the model name from the request
+    model_name = request.form['model']  # e.g. "mobilenet_v2"
     epsilon_value = float(request.form.get('epsilon', 0.05))
     auto_tune = request.form.get('autoTune', 'false').lower() == 'true'
 
-    # Initialize the FGSM class with the selected model
+    # Initialize FGSM
     fgsm = FGSM(epsilon=epsilon_value, model_name=model_name)
 
-    # Process the image and run the attack
+    # Save uploaded image to temp
     image_file = request.files['image']
     image_path = "temp_image.jpg"
     image_file.save(image_path)
 
-    # Choose attack method based on autoTune flag
+    # Attack
     if auto_tune:
         results = fgsm.auto_tune_attack(image_path)
     else:
@@ -31,6 +31,8 @@ def attack():
         results = fgsm.attack(image_path)
 
     if results:
+        # Optionally attach the model name used, so it can be displayed
+        results["model_used"] = model_name
         return jsonify(results)
     else:
         return jsonify({'error': 'Attack failed'}), 500
