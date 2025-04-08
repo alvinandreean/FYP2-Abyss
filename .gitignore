@@ -22,7 +22,7 @@ var/
 wheels/
 pip-wheel-metadata/
 share/python-wheels/
-
+node_modules/
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
@@ -54,3 +54,4 @@ env/
 ENV/
 env.bak/
 venv.bak/
+myenv/
