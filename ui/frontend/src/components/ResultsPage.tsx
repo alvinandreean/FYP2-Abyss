@@ -1,6 +1,7 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
 import ResultsDisplay from '../components/ResultsDisplay';
+import Navbar from './Navbar';
 import { AttackResult } from '../types';
 
 const ResultsPage: React.FC = () => {
@@ -16,13 +17,22 @@ const ResultsPage: React.FC = () => {
           backgroundColor: '#222',
           color: '#fff',
           display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center'
+          flexDirection: 'column'
         }}
       >
-        <h2 style={{ marginBottom: '1rem' }}>Attack Results</h2>
-        <p>No results found. Please run an attack first.</p>
+        <Navbar />
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: 'center'
+          }}
+        >
+          <h2 style={{ marginBottom: '1rem' }}>Attack Results</h2>
+          <p>No results found. Please run an attack first.</p>
+        </div>
       </div>
     );
   }
@@ -34,12 +44,20 @@ const ResultsPage: React.FC = () => {
         minHeight: '100vh',
         backgroundColor: '#222',
         color: '#fff',
-        padding: '20px',
-        boxSizing: 'border-box'
+        display: 'flex',
+        flexDirection: 'column'
       }}
     >
-      {/* Renders the images and info in a nicely styled box */}
-      <ResultsDisplay results={results} />
+      <Navbar />
+      <div
+        style={{
+          padding: '20px',
+          boxSizing: 'border-box'
+        }}
+      >
+        {/* Renders the images and info in a nicely styled box */}
+        <ResultsDisplay results={results} />
+      </div>
     </div>
   );
 };

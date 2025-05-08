@@ -118,14 +118,14 @@ class FGSM:
 
     def create_adversarial_pattern(self, input_image, input_label):
         """Generate untargeted adversarial perturbation using FGSM."""
-        loss_object = tf.keras.losses.CategoricalCrossentropy()
-        
-        with tf.GradientTape() as tape:
-            tape.watch(input_image)
+loss_object = tf.keras.losses.CategoricalCrossentropy()
+
+  with tf.GradientTape() as tape:
+    tape.watch(input_image)
             prediction = self.model(input_image)
-            loss = loss_object(input_label, prediction)
-        
-        gradient = tape.gradient(loss, input_image)
+    loss = loss_object(input_label, prediction)
+
+  gradient = tape.gradient(loss, input_image)
         return tf.sign(gradient)
 
     def attack(self, image_path):

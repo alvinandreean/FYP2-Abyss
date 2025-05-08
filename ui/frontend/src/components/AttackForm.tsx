@@ -50,8 +50,21 @@ const AttackForm: React.FC<AttackFormProps> = ({
     }
 
     try {
+      // Get the authentication token from localStorage
+      const token = localStorage.getItem('token');
+      
+      // Set up request headers with authentication token
+      const headers = {
+        'Content-Type': 'multipart/form-data'
+      };
+      
+      if (token) {
+        // Add the Authorization header if token exists
+        Object.assign(headers, { 'Authorization': `Bearer ${token}` });
+      }
+      
       const res = await axios.post('http://localhost:5000/attack', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers
       });
       const data = res.data;
 
@@ -65,7 +78,6 @@ const AttackForm: React.FC<AttackFormProps> = ({
 
       // Set the results in local state if you still want it in AttackPage
       setResults(processedResults);
-
       // Navigate to /results and pass the processedResults in 'state'
       navigate('/results', { state: { results: processedResults } });
     } catch (error) {
