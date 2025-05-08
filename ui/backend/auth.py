@@ -1,5 +1,5 @@
 from flask_bcrypt import Bcrypt
-import jwt  # Using jwt directly instead of pyjwt
+import PyJWT as jwt  # Using PyJWT instead of jwt package
 import datetime
 import os
 from dotenv import load_dotenv

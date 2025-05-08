@@ -1,6 +1,0 @@
-DB_HOST=switchback.proxy.rlwy.net
-DB_PORT=17240
-DB_USER=tester
-DB_PASSWORD=tester1234
-DB_NAME=railway
-JWT_SECRET=J5658D4W1M
