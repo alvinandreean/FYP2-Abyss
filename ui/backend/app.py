@@ -99,6 +99,29 @@ def verify():
     else:
         return jsonify(result), 401
 
+@app.route('/available-images', methods=['GET'])
+def get_available_images():
+    try:
+        # Fetch all images from the database
+        images = execute_query(
+            "SELECT image_filename, image_label, image_url FROM railway.image",
+            fetch=True
+        )
+        
+        # Format the response
+        image_list = []
+        for image in images:
+            image_list.append({
+                'filename': image['image_filename'],
+                'label': image['image_label'],
+                'url': image['image_url']
+            })
+        
+        return jsonify({'success': True, 'images': image_list}), 200
+    except Exception as e:
+        print(f"Error fetching images: {str(e)}")
+        return jsonify({'success': False, 'message': f'Error fetching images: {str(e)}'}), 500
+
 @app.route('/attack', methods=['POST'])
 def attack():
     if 'image' not in request.files or 'model' not in request.form:
@@ -157,6 +180,75 @@ def attack():
         return jsonify(results)
     else:
         return jsonify({'error': 'Attack failed'}), 500
+
+@app.route('/attack-from-url', methods=['POST'])
+def attack_from_url():
+    data = request.json
+    if not data or 'imageUrl' not in data or 'model' not in data:
+        return jsonify({'error': 'No image URL or model provided'}), 400
+
+    model_name = data['model']
+    epsilon_value = float(data.get('epsilon', 0.05))
+    auto_tune = data.get('autoTune', False)
+    image_url = data['imageUrl']
+    
+    # Initialize FGSM
+    fgsm = FGSM(epsilon=epsilon_value, model_name=model_name)
+
+    try:
+        # Download image from URL
+        import requests
+        from io import BytesIO
+        from PIL import Image
+        
+        response = requests.get(image_url)
+        image = Image.open(BytesIO(response.content))
+        image_path = "temp_image.jpg"
+        image.save(image_path)
+        
+        # Attack
+        if auto_tune:
+            results = fgsm.auto_tune_attack(image_path)
+        else:
+            fgsm.epsilon = epsilon_value
+            results = fgsm.attack(image_path)
+
+        if results:
+            # Attach the model name used
+            results["model_used"] = model_name
+            
+            # Save attack to history if user is authenticated
+            auth_header = request.headers.get('Authorization')
+            if auth_header and auth_header.startswith('Bearer '):
+                token = auth_header.split(' ')[1]
+                token_result = verify_token(token)
+                
+                if token_result['success']:
+                    user_id = token_result['user']['user_id']
+                    
+                    # Save attack to history
+                    execute_query(
+                        """
+                        INSERT INTO attack_history 
+                        (user_id, model_used, epsilon_used, orig_class, orig_conf, adv_class, adv_conf)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            user_id, 
+                            model_name, 
+                            results['epsilon_used'],
+                            results['orig_class'],
+                            results['orig_conf'],
+                            results['adv_class'],
+                            results['adv_conf']
+                        )
+                    )
+            
+            return jsonify(results)
+        else:
+            return jsonify({'error': 'Attack failed'}), 500
+    except Exception as e:
+        return jsonify({'error': f'Error processing attack: {str(e)}'}), 500
 
 @app.route('/history', methods=['GET'])
 def get_history():
