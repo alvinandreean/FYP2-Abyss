@@ -186,4 +186,4 @@ if __name__ == '__main__':
     print("Initializing database...")
     init_db()
     print("Starting Flask server...")
-    app.run(debug=True)
+    app.run(debug=False, host="0.0.0.0")

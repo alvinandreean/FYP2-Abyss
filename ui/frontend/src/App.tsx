@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import AttackPage from './components/FirstPage';
 import ResultsPage from './components/ResultsPage';
 import LoginPage from './components/LoginPage';
@@ -99,17 +99,6 @@ const AuthContext = React.createContext<{
   isLoading: true,
   ProtectedRoute: () => <></>,
 });
-
-// Function to safely check token existence
-const hasValidToken = () => {
-  try {
-    const token = localStorage.getItem('token');
-    return !!token;
-  } catch (e) {
-    console.error('Error checking token:', e);
-    return false;
-  }
-};
 
 // Root component that shows loading until initial auth check is complete
 const AppRouter: React.FC = () => {

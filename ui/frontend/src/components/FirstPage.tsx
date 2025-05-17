@@ -9,7 +9,7 @@ const AttackPage: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [results, setResults] = useState<AttackResult | null>(null);
+  const setResults = useState<AttackResult | null>(null)[1];
 
   return (
     <div

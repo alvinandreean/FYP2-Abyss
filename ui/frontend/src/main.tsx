@@ -19,8 +19,9 @@ const validateToken = () => {
     // If there's no token, nothing to validate
     if (!token) return;
     
+    // We've already checked token is not null, so we can use non-null assertion
     // Simple check: token should be a string and have proper JWT structure (xxx.yyy.zzz)
-    if (!token.match(/^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]*$/)) {
+    if (!token!.match(/^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]*$/)) {
       console.log('Invalid token format detected, removing');
       localStorage.removeItem('token');
       localStorage.removeItem('user');
@@ -28,10 +29,12 @@ const validateToken = () => {
     }
     
     // Check if token is expired by decoding
-    const parts = token.split('.');
+    const parts = token!.split('.');
     if (parts.length < 2) return;
     
     const payload = JSON.parse(atob(parts[1]));
+    if (!payload || !payload.exp) return;
+    
     const exp = payload.exp * 1000; // Convert to milliseconds
     
     if (Date.now() >= exp) {
