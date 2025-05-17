@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import registerBackground from '../assets/register.gif';
 
 const RegisterPage: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -62,7 +63,10 @@ const RegisterPage: React.FC = () => {
       style={{
         width: '100%',
         minHeight: '100vh',
-        backgroundColor: '#222',
+        backgroundImage: `url(${registerBackground})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
         color: '#fff',
         display: 'flex',
         justifyContent: 'center',
@@ -74,10 +78,10 @@ const RegisterPage: React.FC = () => {
       <div
         style={{
           width: '400px',
-          backgroundColor: '#333',
+          backgroundColor: '#2C3539',
           padding: '30px',
           borderRadius: '8px',
-          boxShadow: '0 4px 8px rgba(0, 0, 0, 0.2)'
+          boxShadow: '0 4px 8px rgba(0, 0, 0, 0.4)'
         }}
       >
         <h2 style={{ marginBottom: '20px', textAlign: 'center' }}>Register</h2>

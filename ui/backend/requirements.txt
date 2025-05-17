@@ -7,3 +7,6 @@ mysql-connector-python
 flask-bcrypt
 pyjwt
 python-dotenv
+requests
+pymysql
+cryptography

@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import landingBackground from '../assets/landingpage.gif';
 
 const LandingPage: React.FC = () => {
   const navigate = useNavigate();
@@ -18,7 +19,10 @@ const LandingPage: React.FC = () => {
       alignItems: 'center',
       justifyContent: 'center',
       minHeight: '100vh',
-      backgroundColor: '#222',
+      backgroundImage: `url(${landingBackground})`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      backgroundRepeat: 'no-repeat',
       color: 'white',
       padding: '20px',
       textAlign: 'center'
