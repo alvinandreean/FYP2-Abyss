@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import registerBackground from '../assets/register.gif';
+import registerBackground from '../assets/abyss.gif';
 
 const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');

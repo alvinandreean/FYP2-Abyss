@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import landingBackground from '../assets/landingpage.gif';
+import landingBackground from '../assets/abyss.gif';
 
 const LandingPage: React.FC = () => {
   const navigate = useNavigate();
