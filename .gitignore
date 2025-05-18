@@ -68,3 +68,4 @@ myenv/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+ui/backend/.env

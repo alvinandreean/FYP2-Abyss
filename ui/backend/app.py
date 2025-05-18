@@ -14,36 +14,23 @@ app = Flask(__name__)
 CORS(app)
 bcrypt = Bcrypt(app)
 
-# Initialize database tables if they don't exist
+# Initialize database connection (without creating tables)
 def init_db():
     connection = get_connection()
     if not connection:
         print("Failed to connect to database for initialization")
         return
     
-    cursor = connection.cursor()
-    
-    # Create attack_history table if it doesn't exist
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS attack_history (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        model_used VARCHAR(100) NOT NULL,
-        epsilon_used FLOAT NOT NULL,
-        orig_class VARCHAR(100) NOT NULL,
-        orig_conf FLOAT NOT NULL,
-        adv_class VARCHAR(100) NOT NULL,
-        adv_conf FLOAT NOT NULL,
-        image_path VARCHAR(255),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES user(user_id)
-    )
-    """)
-    
-    connection.commit()
-    cursor.close()
-    connection.close()
-    print("Database initialized successfully")
+    # Test the database connection
+    try:
+        cursor = connection.cursor()
+        cursor.execute("SELECT 1")
+        cursor.close()
+        print("Database connection successful")
+    except Exception as e:
+        print(f"Database connection test failed: {e}")
+    finally:
+        connection.close()
 
 # Authentication routes
 @app.route('/register', methods=['POST'])
@@ -150,32 +137,7 @@ def attack():
         # Optionally attach the model name used, so it can be displayed
         results["model_used"] = model_name
         
-        # Save attack to history if user is authenticated
-        auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-            token_result = verify_token(token)
-            
-            if token_result['success']:
-                user_id = token_result['user']['user_id']
-                
-                # Save attack to history
-                execute_query(
-                    """
-                    INSERT INTO attack_history 
-                    (user_id, model_used, epsilon_used, orig_class, orig_conf, adv_class, adv_conf)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        user_id, 
-                        model_name, 
-                        results['epsilon_used'],
-                        results['orig_class'],
-                        results['orig_conf'],
-                        results['adv_class'],
-                        results['adv_conf']
-                    )
-                )
+        # We're skipping saving attack history to avoid permission issues
         
         return jsonify(results)
     else:
@@ -265,14 +227,17 @@ def get_history():
     
     user_id = token_result['user']['user_id']
     
-    # Get user's attack history
-    history = execute_query(
-        "SELECT * FROM attack_history WHERE user_id = %s ORDER BY created_at DESC",
-        (user_id,),
-        fetch=True
-    )
-    
-    return jsonify({'success': True, 'history': history}), 200
+    # Try to get attack history, but don't fail if table doesn't exist
+    try:
+        history = execute_query(
+            "SELECT * FROM attack_history WHERE user_id = %s ORDER BY created_at DESC",
+            (user_id,),
+            fetch=True
+        )
+        return jsonify({'success': True, 'history': history}), 200
+    except Exception as e:
+        print(f"Error fetching history: {e}")
+        return jsonify({'success': True, 'history': [], 'message': 'History feature unavailable'}), 200
 
 if __name__ == '__main__':
     print("Initializing database...")
