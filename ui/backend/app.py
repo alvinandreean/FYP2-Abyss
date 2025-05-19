@@ -121,27 +121,53 @@ def attack():
     # Initialize FGSM
     fgsm = FGSM(epsilon=epsilon_value, model_name=model_name)
 
-    # Save uploaded image to temp
-    image_file = request.files['image']
-    image_path = "temp_image.jpg"
-    image_file.save(image_path)
-
-    # Attack
-    if auto_tune:
-        results = fgsm.auto_tune_attack(image_path)
-    else:
-        fgsm.epsilon = epsilon_value
-        results = fgsm.attack(image_path)
-
-    if results:
-        # Optionally attach the model name used, so it can be displayed
-        results["model_used"] = model_name
+    try:
+        # Save uploaded image to temp file with a unique name
+        image_file = request.files['image']
+        import uuid
+        import datetime
         
-        # We're skipping saving attack history to avoid permission issues
+        # Create unique filename to avoid conflicts
+        unique_id = str(uuid.uuid4())[:8]
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_filename = f"temp_image_{timestamp}_{unique_id}.jpg"
         
-        return jsonify(results)
-    else:
-        return jsonify({'error': 'Attack failed'}), 500
+        image_path = safe_filename
+        print(f"Saving uploaded image to {image_path}")
+        image_file.save(image_path)
+
+        # Attack
+        print(f"Running {'auto-tune' if auto_tune else 'regular'} attack with model {model_name}")
+        if auto_tune:
+            results = fgsm.auto_tune_attack(image_path)
+            print(f"Auto-tune attack completed, results: {'Success' if results else 'Failed'}")
+        else:
+            fgsm.epsilon = epsilon_value
+            results = fgsm.attack(image_path)
+            print(f"Regular attack completed, results: {'Success' if results else 'Failed'}")
+
+        # Clean up temp file 
+        try:
+            os.remove(image_path)
+            print(f"Cleaned up temporary file {image_path}")
+        except Exception as e:
+            print(f"Warning: Failed to remove temp file {image_path}: {e}")
+
+        if results:
+            # Optionally attach the model name used, so it can be displayed
+            results["model_used"] = model_name
+            return jsonify(results)
+        else:
+            # If results is None, the attack failed
+            error_msg = "Attack failed. The model might not be able to classify the image or find an adversarial example."
+            print(error_msg)
+            return jsonify({'error': error_msg}), 500
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error in attack: {str(e)}")
+        print(f"Detailed traceback: {error_details}")
+        return jsonify({'error': f'Attack error: {str(e)}'}), 500
 
 @app.route('/attack-from-url', methods=['POST'])
 def attack_from_url():
@@ -162,18 +188,47 @@ def attack_from_url():
         import requests
         from io import BytesIO
         from PIL import Image
+        import uuid
+        import datetime
         
+        print(f"Downloading image from URL: {image_url}")
         response = requests.get(image_url)
-        image = Image.open(BytesIO(response.content))
-        image_path = "temp_image.jpg"
-        image.save(image_path)
+        
+        # Create unique filename to avoid conflicts
+        unique_id = str(uuid.uuid4())[:8]
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_filename = f"temp_image_{timestamp}_{unique_id}.jpg"
+        
+        # Opening and saving as JPEG for compatibility
+        try:
+            image = Image.open(BytesIO(response.content))
+            # Make sure it's RGB (not RGBA, grayscale, etc)
+            if image.mode != 'RGB':
+                print(f"Converting image from {image.mode} to RGB")
+                image = image.convert('RGB')
+            image_path = safe_filename
+            print(f"Saving image to {image_path}")
+            image.save(image_path, format='JPEG', quality=95)
+        except Exception as image_error:
+            print(f"Error processing downloaded image: {str(image_error)}")
+            return jsonify({'error': f'Error processing image: {str(image_error)}'}), 500
         
         # Attack
+        print(f"Running {'auto-tune' if auto_tune else 'regular'} attack with model {model_name}")
         if auto_tune:
             results = fgsm.auto_tune_attack(image_path)
+            print(f"Auto-tune attack completed, results: {'Success' if results else 'Failed'}")
         else:
             fgsm.epsilon = epsilon_value
             results = fgsm.attack(image_path)
+            print(f"Regular attack completed, results: {'Success' if results else 'Failed'}")
+
+        # Clean up temp file 
+        try:
+            os.remove(image_path)
+            print(f"Cleaned up temporary file {image_path}")
+        except Exception as e:
+            print(f"Warning: Failed to remove temp file {image_path}: {e}")
 
         if results:
             # Attach the model name used
@@ -189,27 +244,38 @@ def attack_from_url():
                     user_id = token_result['user']['user_id']
                     
                     # Save attack to history
-                    execute_query(
-                        """
-                        INSERT INTO attack_history 
-                        (user_id, model_used, epsilon_used, orig_class, orig_conf, adv_class, adv_conf)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        """,
-                        (
-                            user_id, 
-                            model_name, 
-                            results['epsilon_used'],
-                            results['orig_class'],
-                            results['orig_conf'],
-                            results['adv_class'],
-                            results['adv_conf']
+                    try:
+                        execute_query(
+                            """
+                            INSERT INTO attack_history 
+                            (user_id, model_used, epsilon_used, orig_class, orig_conf, adv_class, adv_conf)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            (
+                                user_id, 
+                                model_name, 
+                                results['epsilon_used'],
+                                results['orig_class'],
+                                results['orig_conf'],
+                                results['adv_class'],
+                                results['adv_conf']
+                            )
                         )
-                    )
+                    except Exception as e:
+                        print(f"Error saving to history: {str(e)}")
+                        # Continue even if history saving fails
             
             return jsonify(results)
         else:
-            return jsonify({'error': 'Attack failed'}), 500
+            # If results is None, the attack failed
+            error_msg = "Attack failed. The model might not be able to classify the image or find an adversarial example."
+            print(error_msg)
+            return jsonify({'error': error_msg}), 500
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error in attack_from_url: {str(e)}")
+        print(f"Detailed traceback: {error_details}")
         return jsonify({'error': f'Error processing attack: {str(e)}'}), 500
 
 @app.route('/history', methods=['GET'])

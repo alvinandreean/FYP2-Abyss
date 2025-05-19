@@ -85,7 +85,11 @@ class FGSM:
             return result[0], class_name, confidence
         except Exception as e:
             print(f"Error in get_imagenet_label: {e}")
-            return ("unknown", "unknown", 0.0)
+            # Instead of returning unknown with 0.0 confidence, let's get the highest confidence class
+            # This way even if we can't decode the label properly, we still get usable values
+            predicted_class_idx = tf.argmax(probs[0]).numpy()
+            confidence = float(probs[0][predicted_class_idx])
+            return (f"class_{predicted_class_idx}", f"class_{predicted_class_idx}", confidence)
 
     def create_adversarial_pattern(self, input_image, input_label):
         loss_object = tf.keras.losses.CategoricalCrossentropy()
@@ -138,72 +142,147 @@ class FGSM:
         results["epsilon_used"] = self.epsilon
         return results
 
-    def auto_tune_attack(self, image_path, epsilon_min=0.0001, epsilon_max=1, coarse_step=0.05, fine_step=0.001, min_confidence=0.01):
+    def auto_tune_attack(self, image_path, epsilon_min=0.0001, epsilon_max=1, coarse_step=0.05, fine_step=0.001, min_confidence=0.001):
         start_time = time.time()
 
-        print(self.model_name.upper())
+        print(f"AUTO-TUNE ATTACK: Running with {self.model_name.upper()}")
         try:
             image = self.preprocess(image_path)
         except Exception as e:
-            print(f"Error preprocessing image: {e}")
-            return None, None, None, None
+            print(f"ERROR in auto_tune_attack preprocessing: {e}")
+            return None
 
         image_probs = self.model.predict(image, verbose=0)
         _, orig_class, orig_conf = self.get_imagenet_label(image_probs)
         print(f"Original Prediction: {orig_class} ({orig_conf * 100:.2f}%)")
 
+        # If original confidence is extremely low, it may be hard to attack
+        if orig_conf < 0.01:
+            print(f"WARNING: Original image has very low confidence ({orig_conf*100:.2f}%). Attack may be unreliable.")
+
         predicted_class_idx = tf.argmax(image_probs[0]).numpy()
         target = tf.one_hot(predicted_class_idx, image_probs.shape[-1])
         target = tf.reshape(target, (1, image_probs.shape[-1]))
 
-        perturbations = self.create_adversarial_pattern(image, target)
+        try:
+            perturbations = self.create_adversarial_pattern(image, target)
+        except Exception as e:
+            print(f"ERROR creating adversarial pattern: {e}")
+            # Return a basic "attack failed" result instead of None
+            return {
+                "original_image": self.np_to_base64(np.clip(image[0] * 0.5 + 0.5, 0, 1)),
+                "perturbation_image": self.np_to_base64(np.zeros_like(image[0])),
+                "adversarial_image": self.np_to_base64(np.clip(image[0] * 0.5 + 0.5, 0, 1)),
+                "orig_class": orig_class,
+                "adv_class": orig_class,  # Same as original since attack failed
+                "orig_conf": float(orig_conf),
+                "adv_conf": float(orig_conf),  # Same as original since attack failed
+                "epsilon_used": 0.0,
+                "attack_success": False,
+                "error": f"Failed to create perturbation: {str(e)}"
+            }
 
         best_epsilon = None
         best_adv_image = None
         best_adv_class = None
         best_adv_conf = None
 
+        # Try to perturb with maximum epsilon first to see if attack is possible
+        try:
+            max_adv_image = tf.clip_by_value(image + epsilon_max * perturbations, -1, 1)
+            max_probs = self.model.predict(max_adv_image, verbose=0)
+            _, max_class, max_conf = self.get_imagenet_label(max_probs)
+            
+            print(f"Testing max epsilon {epsilon_max}: class={max_class}, conf={max_conf*100:.2f}%")
+            
+            # If even max epsilon doesn't change the class or confidence is too low
+            if max_class == orig_class or max_conf < min_confidence:
+                print(f"❌ Maximum ε={epsilon_max} doesn't produce a reliable attack.")
+                print(f"  Max epsilon produces class {max_class} with {max_conf*100:.2f}% confidence.")
+                
+                # Try forcing a higher epsilon for images that are hard to attack
+                forced_epsilon = 0.5  # Use a significant perturbation 
+                print(f"Trying a forced higher epsilon of {forced_epsilon}...")
+                forced_adv_image = tf.clip_by_value(image + forced_epsilon * perturbations, -1, 1)
+                forced_probs = self.model.predict(forced_adv_image, verbose=0)
+                _, forced_class, forced_conf = self.get_imagenet_label(forced_probs)
+                
+                if forced_class != orig_class and forced_conf >= min_confidence:
+                    print(f"✓ Forced epsilon {forced_epsilon} worked! Class: {forced_class}, Conf: {forced_conf*100:.2f}%")
+                    best_epsilon = forced_epsilon
+                    best_adv_image = forced_adv_image
+                    best_adv_class = forced_class
+                    best_adv_conf = forced_conf
+                else:
+                    # Return a basic result with the original image
+                    print(f"⚠ Unable to find adversarial example. Using original with warning.")
+                    return {
+                        "original_image": self.np_to_base64(np.clip(image[0] * 0.5 + 0.5, 0, 1)),
+                        "perturbation_image": self.np_to_base64(np.clip(perturbations[0] * 0.5 + 0.5, 0, 1)),
+                        "adversarial_image": self.np_to_base64(np.clip(max_adv_image[0] * 0.5 + 0.5, 0, 1)),
+                        "orig_class": orig_class,
+                        "adv_class": max_class,
+                        "orig_conf": float(orig_conf),
+                        "adv_conf": float(max_conf),
+                        "epsilon_used": epsilon_max,
+                        "attack_success": False,
+                        "warning": "Could not find an effective adversarial example that changes the class."
+                    }
+        except Exception as e:
+            print(f"ERROR testing max epsilon: {e}")
+            # Continue with the search anyway
+
         # Step 1: Coarse search (larger step to quickly find a good epsilon range)
+        print("Starting coarse search...")
         epsilon = epsilon_min
         while epsilon <= epsilon_max:
-            adv_image = tf.clip_by_value(image + epsilon * perturbations, -1, 1)
-            adv_probs = self.model.predict(adv_image, verbose=0)
-            _, adv_class, adv_conf = self.get_imagenet_label(adv_probs)
-
-            print(f"Coarse Search: Trying ε = {epsilon:.5f} -> Class: {adv_class}, Confidence: {adv_conf*100:.2f}%")
-
-            # If we find a misclassification with sufficient confidence, stop
-            if adv_class != orig_class and adv_conf >= min_confidence:
-                print(f"  ✓ Coarse Search: Attack succeeded with sufficient confidence!")
-                best_epsilon = epsilon
-                best_adv_image = adv_image
-                best_adv_class = adv_class
-                best_adv_conf = adv_conf
-                break
-
-            epsilon += coarse_step
-
-        # Step 2: Fine search (narrow down epsilon with small steps)
-        if best_epsilon is not None:
-            # Fine search (narrowing down epsilon in small steps)
-            epsilon_start = max(epsilon_min, best_epsilon - coarse_step)  # Start from the last candidate
-            epsilon_end = min(epsilon_max, best_epsilon + coarse_step)    # Limit the epsilon range
-            epsilon = epsilon_start
-
-            while epsilon <= epsilon_end:
+            try:
                 adv_image = tf.clip_by_value(image + epsilon * perturbations, -1, 1)
                 adv_probs = self.model.predict(adv_image, verbose=0)
                 _, adv_class, adv_conf = self.get_imagenet_label(adv_probs)
 
-                print(f"Fine Search: Trying ε = {epsilon:.6f} -> Class: {adv_class}, Confidence: {adv_conf*100:.2f}%")
+                print(f"Coarse Search: Trying ε = {epsilon:.5f} -> Class: {adv_class}, Confidence: {adv_conf*100:.2f}%")
 
+                # If we find a misclassification with sufficient confidence, stop
                 if adv_class != orig_class and adv_conf >= min_confidence:
+                    print(f"  ✓ Coarse Search: Attack succeeded with sufficient confidence!")
                     best_epsilon = epsilon
                     best_adv_image = adv_image
                     best_adv_class = adv_class
                     best_adv_conf = adv_conf
                     break
+            except Exception as e:
+                print(f"Error in coarse search at epsilon={epsilon}: {e}")
+                # Continue with next epsilon
+            
+            epsilon += coarse_step
 
+        # Step 2: Fine search if we found something in coarse search
+        if best_epsilon is not None:
+            print("Starting fine search...")
+            # Fine search (narrowing down epsilon in small steps)
+            epsilon_start = max(epsilon_min, best_epsilon - coarse_step)  # Start from the last candidate
+            epsilon_end = min(epsilon_max, best_epsilon)  # Don't search higher than what we know works
+            epsilon = epsilon_start
+
+            while epsilon <= epsilon_end:
+                try:
+                    adv_image = tf.clip_by_value(image + epsilon * perturbations, -1, 1)
+                    adv_probs = self.model.predict(adv_image, verbose=0)
+                    _, adv_class, adv_conf = self.get_imagenet_label(adv_probs)
+
+                    print(f"Fine Search: Trying ε = {epsilon:.6f} -> Class: {adv_class}, Confidence: {adv_conf*100:.2f}%")
+
+                    if adv_class != orig_class and adv_conf >= min_confidence:
+                        best_epsilon = epsilon
+                        best_adv_image = adv_image
+                        best_adv_class = adv_class
+                        best_adv_conf = adv_conf
+                        break
+                except Exception as e:
+                    print(f"Error in fine search at epsilon={epsilon}: {e}")
+                    # Continue with next epsilon
+                
                 epsilon += fine_step
 
         end_time = time.time()
@@ -219,14 +298,32 @@ class FGSM:
                 orig_class, best_adv_class, orig_conf, best_adv_conf
             )
             results["epsilon_used"] = best_epsilon
+            results["attack_success"] = True
             return results
         else:
             print(f"\n❌ Attack failed. No epsilon in range caused misclassification with {min_confidence*100:.0f}% confidence.")
             print(f"⏱️ Auto-tune completed in {duration:.2f} seconds")
-            return None
+            
+            # Return a result even when auto-tune fails, using highest epsilon
+            max_adv_image = tf.clip_by_value(image + epsilon_max * perturbations, -1, 1)
+            max_probs = self.model.predict(max_adv_image, verbose=0)
+            _, max_class, max_conf = self.get_imagenet_label(max_probs)
+            
+            return {
+                "original_image": self.np_to_base64(np.clip(image[0] * 0.5 + 0.5, 0, 1)),
+                "perturbation_image": self.np_to_base64(np.clip(perturbations[0] * 0.5 + 0.5, 0, 1)),
+                "adversarial_image": self.np_to_base64(np.clip(max_adv_image[0] * 0.5 + 0.5, 0, 1)),
+                "orig_class": orig_class,
+                "adv_class": max_class,
+                "orig_conf": float(orig_conf),
+                "adv_conf": float(max_conf),
+                "epsilon_used": epsilon_max,
+                "attack_success": False,
+                "warning": "Could not find a good adversarial example. Showing result with maximum epsilon."
+            }
 
     def display_attack_results(self, original_image, perturbation, adversarial_image, 
-                               orig_class, adv_class, orig_conf, adv_conf):
+                               orig_class, adv_class, orig_conf, adv_conf, output_dir=None):
         """
         Return separate Base64 images for original, perturbation, and adversarial images.
         """

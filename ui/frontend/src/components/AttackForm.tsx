@@ -80,10 +80,18 @@ const AttackForm: React.FC<AttackFormProps> = ({
           headers['Authorization'] = `Bearer ${token}`;
         }
         
+        console.log('Submitting file attack with:', { 
+          file: selectedFile.name, 
+          autoTune, 
+          model: selectedModel, 
+          epsilon: autoTune ? 'auto' : epsilon 
+        });
+        
         const res = await axios.post('http://localhost:5000/attack', formData, {
           headers
         });
         data = res.data;
+        console.log('Attack response:', data);
       } else if (selectedImageUrl) {
         // Handle URL-based attack
         const requestData = {
@@ -103,13 +111,35 @@ const AttackForm: React.FC<AttackFormProps> = ({
           headers['Authorization'] = `Bearer ${token}`;
         }
         
+        console.log('Submitting URL attack with:', { 
+          imageUrl: selectedImageUrl, 
+          autoTune, 
+          model: selectedModel, 
+          epsilon: autoTune ? 'auto' : epsilon 
+        });
+        
         const res = await axios.post('http://localhost:5000/attack-from-url', requestData, {
           headers
         });
         data = res.data;
+        console.log('Attack response:', data);
       }
 
       if (data) {
+        if (data.error) {
+          console.error("Error from server:", data.error);
+          alert(`Attack failed: ${data.error}`);
+          setIsLoading(false);
+          return;
+        }
+        
+        // Check if there's a warning in the results
+        if (data.warning) {
+          console.warn("Warning from attack:", data.warning);
+          // Show warning but continue processing
+          alert(`Warning: ${data.warning}`);
+        }
+        
         const processedResults: AttackResult = {
           ...data,
           // Convert returned strings to data URLs:
@@ -123,9 +153,26 @@ const AttackForm: React.FC<AttackFormProps> = ({
         // Navigate to /results and pass the processedResults in 'state'
         navigate('/results', { state: { results: processedResults } });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error processing attack:", error);
-      alert('Error processing attack');
+      
+      // Extract and log detailed error information
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        console.error("Error data:", error.response.data);
+        console.error("Error status:", error.response.status);
+        console.error("Error headers:", error.response.headers);
+        alert(`Error: ${error.response.data.error || error.response.data.message || 'Server error'}`);
+      } else if (error.request) {
+        // The request was made but no response was received
+        console.error("Error request:", error.request);
+        alert('Error: No response from server. Please try again later.');
+      } else {
+        // Something happened in setting up the request that triggered an Error
+        console.error("Error message:", error.message);
+        alert(`Error: ${error.message}`);
+      }
     } finally {
       setIsLoading(false);
     }

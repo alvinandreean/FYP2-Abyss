@@ -114,7 +114,11 @@ class FGSM:
             return result[0], class_name, confidence
         except Exception as e:
             print(f"Error in get_imagenet_label: {e}")
-            return ("unknown", "unknown", 0.0)
+            # Instead of returning unknown with 0.0 confidence, let's get the highest confidence class
+            # This way even if we can't decode the label properly, we still get usable values
+            predicted_class_idx = tf.argmax(probs[0]).numpy()
+            confidence = float(probs[0][predicted_class_idx])
+            return (f"class_{predicted_class_idx}", f"class_{predicted_class_idx}", confidence)
 
     def create_adversarial_pattern(self, input_image, input_label):
         """Generate untargeted adversarial perturbation using FGSM."""
@@ -144,11 +148,12 @@ loss_object = tf.keras.losses.CategoricalCrossentropy()
             image = self.preprocess(image_path)
         except Exception as e:
             print(f"Error preprocessing image: {e}")
-            return
+            return None
 
         # Get the original prediction from the model
         image_probs = self.model.predict(image, verbose=0)
         _, orig_class, orig_conf = self.get_imagenet_label(image_probs)
+        print(f"Original class: {orig_class}, confidence: {orig_conf:.4f}")
 
         # Create the target adversarial example
         predicted_class_idx = tf.argmax(image_probs[0]).numpy()
@@ -164,14 +169,15 @@ loss_object = tf.keras.losses.CategoricalCrossentropy()
         if self.model_name in ['mobilenet_v2', 'inception_v3', 'vgg19', 'densenet121']:
             adversarial_image = tf.clip_by_value(adversarial_image, -1, 1)
         else:
-            NotImplementedError("Model not supported for clipping.")
+            raise NotImplementedError("Model not supported for clipping.")
             
         # Get adversarial prediction from the model
         adv_probs = self.model.predict(adversarial_image, verbose=0)
         _, adv_class, adv_conf = self.get_imagenet_label(adv_probs)
+        print(f"Adversarial class: {adv_class}, confidence: {adv_conf:.4f}")
 
         # Display the attack results
-        self.display_attack_results(
+        results = self.display_attack_results(
             image, perturbations, adversarial_image,
             orig_class, adv_class, orig_conf, adv_conf,
             output_dir
@@ -179,6 +185,7 @@ loss_object = tf.keras.losses.CategoricalCrossentropy()
         
         end_time = time.time()
         print(f"Attack completed in {end_time - start_time:.2f} seconds")
+        return results  # Return results dict for API usage
 
     def auto_tune_attack(self, image_path, epsilon_min=0.0001, epsilon_max=1, precision=0.0001, max_iterations=500, min_confidence=0.01):
         """
@@ -319,49 +326,61 @@ loss_object = tf.keras.losses.CategoricalCrossentropy()
                             orig_class, adv_class, orig_conf, adv_conf, output_dir):
         """Display and save attack results in a single, detailed figure."""
 
-
         # For MobileNetV2, InceptionV3, 
         display_original = np.clip(original_image[0] * 0.5 + 0.5, 0, 1)
         display_adv = np.clip(adversarial_image[0] * 0.5 + 0.5, 0, 1)
         display_pert = np.clip(perturbation[0] * 0.5 + 0.5, 0, 1)
         
-        plt.figure(figsize=(20, 7))
+        # Save plot to file if output_dir is provided
+        if output_dir:
+            plt.figure(figsize=(20, 7))
+                
+            # Original image
+            plt.subplot(1, 3, 1)
+            plt.imshow(display_original)
+            plt.title('Original Image', fontsize=14, pad=10)
+            plt.axis('off')
+            plt.text(0.5, -0.15, f'Class: {orig_class}\nConfidence: {orig_conf*100:.2f}%', 
+                    ha='center', va='center', transform=plt.gca().transAxes, 
+                    fontsize=12, color='black')
             
-        # Original image
-        plt.subplot(1, 3, 1)
-        plt.imshow(display_original)
-        plt.title('Original Image', fontsize=14, pad=10)
-        plt.axis('off')
-        plt.text(0.5, -0.15, f'Class: {orig_class}\nConfidence: {orig_conf*100:.2f}%', 
-                ha='center', va='center', transform=plt.gca().transAxes, 
-                fontsize=12, color='black')
+            # Perturbation
+            plt.subplot(1, 3, 2)
+            plt.imshow(display_pert)
+            plt.title('Perturbation', fontsize=14, pad=10)
+            plt.axis('off')
+            plt.text(0.5, -0.15, f'ε = {self.epsilon}', 
+                    ha='center', va='center', transform=plt.gca().transAxes, 
+                    fontsize=12, color='black')
+            
+            # Adversarial image
+            plt.subplot(1, 3, 3)
+            plt.imshow(display_adv)
+            plt.title('Adversarial Image', fontsize=14, pad=10)
+            plt.axis('off')
+            plt.text(0.5, -0.15, f'Class: {adv_class}\nConfidence: {adv_conf*100:.2f}%', 
+                    ha='center', va='center', transform=plt.gca().transAxes, 
+                    fontsize=12, color='black')
+            
+            # Title
+            plt.suptitle('FGSM Attack Results', fontsize=16, y=1)
+            
+            # Adjust layout and save
+            plt.tight_layout()
+            plt.savefig(os.path.join(output_dir, 'fgsm_attack_results.png'), 
+                        bbox_inches='tight', dpi=300)
+            plt.close()
         
-        # Perturbation
-        plt.subplot(1, 3, 2)
-        plt.imshow(display_pert)
-        plt.title('Perturbation', fontsize=14, pad=10)
-        plt.axis('off')
-        plt.text(0.5, -0.15, f'ε = {self.epsilon}', 
-                ha='center', va='center', transform=plt.gca().transAxes, 
-                fontsize=12, color='black')
-        
-        # Adversarial image
-        plt.subplot(1, 3, 3)
-        plt.imshow(display_adv)
-        plt.title('Adversarial Image', fontsize=14, pad=10)
-        plt.axis('off')
-        plt.text(0.5, -0.15, f'Class: {adv_class}\nConfidence: {adv_conf*100:.2f}%', 
-                ha='center', va='center', transform=plt.gca().transAxes, 
-                fontsize=12, color='black')
-        
-        # Title
-        plt.suptitle('FGSM Attack Results', fontsize=16, y=1)
-        
-        # Adjust layout and save
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, 'fgsm_attack_results.png'), 
-                    bbox_inches='tight', dpi=300)
-        plt.close()
+        # Return a dictionary with the results
+        return {
+            "orig_class": orig_class,
+            "adv_class": adv_class,
+            "orig_conf": float(orig_conf),
+            "adv_conf": float(adv_conf),
+            "epsilon_used": self.epsilon,
+            # We don't convert to base64 here since this version
+            # doesn't need to return the images over API
+        }
 
 def main():
     # image_path = "image/animals/val/dog/dog1.jpg"  # Change image path here
