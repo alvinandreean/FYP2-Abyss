@@ -6,6 +6,8 @@ from auth import register_user, login_user, verify_token
 from flask_bcrypt import Bcrypt
 from db import execute_query, get_connection
 from dotenv import load_dotenv
+from PIL import Image
+from io import BytesIO
 
 # Load environment variables
 load_dotenv()
@@ -187,7 +189,6 @@ def attack_from_url():
         # Download image from URL
         import requests
         from io import BytesIO
-        from PIL import Image
         import uuid
         import datetime
         
@@ -202,8 +203,15 @@ def attack_from_url():
         # Opening and saving as JPEG for compatibility
         try:
             image = Image.open(BytesIO(response.content))
-            # Make sure it's RGB (not RGBA, grayscale, etc)
-            if image.mode != 'RGB':
+            # Handle RGBA images by creating a white background
+            if image.mode == 'RGBA':
+                print(f"Converting RGBA image to RGB with white background")
+                # Create a white background image
+                background = Image.new('RGB', image.size, (255, 255, 255))
+                # Paste the image on the background using alpha channel as mask
+                background.paste(image, mask=image.split()[3])
+                image = background
+            elif image.mode != 'RGB':
                 print(f"Converting image from {image.mode} to RGB")
                 image = image.convert('RGB')
             image_path = safe_filename
