@@ -5,13 +5,6 @@ import landingBackground from '../assets/abyss.gif';
 const LandingPage: React.FC = () => {
   const navigate = useNavigate();
   
-  const clearLocalStorage = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    console.log('Cleared localStorage tokens');
-    window.dispatchEvent(new Event('auth-change'));
-  };
-
   return (
     <div style={{
       display: 'flex',
@@ -71,19 +64,6 @@ const LandingPage: React.FC = () => {
           Register
         </button>
       </div>
-      
-      {/* Dev button for testing */}
-      <button 
-        onClick={clearLocalStorage} 
-        style={{ 
-          marginTop: '20px',
-          backgroundColor: 'red',
-          padding: '5px 10px',
-          fontSize: '0.8rem'
-        }}
-      >
-        Dev: Clear Token
-      </button>
     </div>
   );
 };
