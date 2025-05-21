@@ -31,6 +31,13 @@ const AttackForm: React.FC<AttackFormProps> = ({
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const file = e.target.files[0];
+      // Frontend validation for image file types
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/bmp', 'image/gif'];
+      if (!allowedTypes.includes(file.type)) {
+        alert('Invalid file type. Only image files (jpg, jpeg, png, bmp, gif) are allowed.');
+        e.target.value = '';
+        return;
+      }
       setSelectedFile(file);
       setPreview(URL.createObjectURL(file));
       setSelectedImageUrl(null); // Clear any selected URL image

@@ -8,6 +8,7 @@ from db import execute_query, get_connection
 from dotenv import load_dotenv
 from PIL import Image
 from io import BytesIO
+from werkzeug.utils import secure_filename
 
 # Load environment variables
 load_dotenv()
@@ -129,6 +130,12 @@ def attack():
         import uuid
         import datetime
         
+        # File type validation (allow only image extensions)
+        allowed_extensions = {'jpg', 'jpeg', 'png', 'bmp', 'gif'}
+        filename = secure_filename(image_file.filename)
+        if '.' not in filename or filename.rsplit('.', 1)[1].lower() not in allowed_extensions:
+            return jsonify({'error': 'Invalid file type. Only image files (jpg, jpeg, png, bmp, gif) are allowed.'}), 400
+
         # Create unique filename to avoid conflicts
         unique_id = str(uuid.uuid4())[:8]
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
