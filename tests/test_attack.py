@@ -5,8 +5,8 @@ import io
 import json
 from unittest.mock import patch, MagicMock
 
-# Add the project root to the Python path
-sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+# Add the project root to the Python path - FIX: use correct path to project root
+sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 
 # Set up mocks for dependencies
 mock_fgsm_instance = MagicMock()
