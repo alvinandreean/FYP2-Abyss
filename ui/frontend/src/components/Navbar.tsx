@@ -67,6 +67,19 @@ const Navbar: React.FC = () => {
         >
           History
         </div>
+
+        <div
+          style={{
+            marginRight: '20px',
+            cursor: 'pointer',
+            padding: '8px 12px',
+            borderRadius: '4px',
+            transition: 'background-color 0.3s ease'
+          }}
+          onClick={() => navigate('/model-info')}
+        >
+          Model Info
+        </div>
         
         <button
           onClick={handleLogout}

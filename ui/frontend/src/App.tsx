@@ -6,6 +6,7 @@ import LoginPage from './components/LoginPage';
 import RegisterPage from './components/RegisterPage';
 import HistoryPage from './components/HistoryPage';
 import LandingPage from './components/LandingPage';
+import ModelInfoPage from './components/ModelInfoPage';
 
 // Create a wrapper component to handle authentication
 const AuthWrapper: React.FC<{children: React.ReactNode}> = ({ children }) => {
@@ -144,6 +145,11 @@ const AppRouter: React.FC = () => {
       <Route path="/history" element={
         <AuthContext.Consumer>
           {({ ProtectedRoute }) => <ProtectedRoute element={<HistoryPage />} />}
+        </AuthContext.Consumer>
+      } />
+      <Route path="/model-info" element={
+        <AuthContext.Consumer>
+          {({ ProtectedRoute }) => <ProtectedRoute element={<ModelInfoPage />} />}
         </AuthContext.Consumer>
       } />
     </Routes>

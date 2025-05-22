@@ -14,7 +14,8 @@ from werkzeug.utils import secure_filename
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+# Configure CORS to allow requests from any origin
+CORS(app, resources={r"/*": {"origins": "*"}})
 bcrypt = Bcrypt(app)
 
 # Initialize database connection (without creating tables)
@@ -319,6 +320,38 @@ def get_history():
     except Exception as e:
         print(f"Error fetching history: {e}")
         return jsonify({'success': True, 'history': [], 'message': 'History feature unavailable'}), 200
+
+@app.route('/model-info', methods=['GET'])
+def get_model_info():
+    try:
+        # Information based on TensorFlow documentation
+        models_info = [
+            {
+                "model_name": "MobileNet V2",
+                "architecture": "Convolutional Neural Network (CNN)",
+                "accuracy": 0.901,  # 90.1%
+                "misclassification_success_rate": 0.78,  # 78%
+                "parameters": 3538984,  # ~3.5 million parameters
+                "training_dataset": "ImageNet",
+                "description": "MobileNetV2 is a lightweight CNN architecture designed for mobile and edge devices. It uses inverted residuals and linear bottlenecks to achieve high accuracy while maintaining computational efficiency. The model is particularly suited for applications with limited computational resources."
+            },
+            {
+                "model_name": "Inception V3",
+                "architecture": "Inception Network",
+                "accuracy": 0.937,  # 93.7%
+                "misclassification_success_rate": 0.72,  # 72%
+                "parameters": 23851784,  # ~23.8 million parameters
+                "training_dataset": "ImageNet",
+                "description": "Inception V3 is a deep CNN architecture that builds on previous Inception models by incorporating additional factorization methods. It uses asymmetric convolutions, auxiliary classifiers, and batch normalization to achieve high accuracy. The model was designed to be computationally efficient while maintaining high performance on image classification tasks."
+            }
+        ]
+        
+        print("Successfully prepared model info data")
+        response = jsonify(models_info)
+        return response, 200
+    except Exception as e:
+        print(f"Error fetching model information: {str(e)}")
+        return jsonify({'error': f'Failed to retrieve model information: {str(e)}'}), 500
 
 if __name__ == '__main__':
     print("Initializing database...")

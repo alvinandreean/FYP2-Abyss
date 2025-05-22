@@ -2,9 +2,14 @@ FROM node:20-alpine as build
 
 WORKDIR /app
 
+# Copy package files first for better caching
 COPY ui/frontend/package*.json ./
 RUN npm install
 
+# Add a timestamp to bust cache
+RUN echo "Build timestamp: $(date)" > build_timestamp.txt
+
+# Copy all frontend files
 COPY ui/frontend .
 
 # Skip TypeScript checks and run Vite build directly

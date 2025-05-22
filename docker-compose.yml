@@ -5,12 +5,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.backend
+      no_cache: true
     ports:
       - "5000:5000"
     environment:
       - FLASK_ENV=production
-    volumes:
-      - ./fgsm:/app/fgsm
     networks:
       - app-network
 
@@ -18,6 +17,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
+      no_cache: true
     ports:
       - "80:80"
     depends_on:
