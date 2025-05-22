@@ -6,7 +6,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY ui/backend /app/backend
-COPY fgsm /app/fgsm
 
 WORKDIR /app/backend
 
